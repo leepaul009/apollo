@@ -39,6 +39,7 @@ const std::vector<std::pair<double, double>>& SpeedLimit::speed_limit_points()
   return speed_limit_points_;
 }
 
+// 找到speedlimit,使它是第一个的自身s值小于输入s的
 double SpeedLimit::GetSpeedLimitByS(const double s) const {
   CHECK_GE(speed_limit_points_.size(), 2U);
   DCHECK_GE(s, speed_limit_points_.front().first);

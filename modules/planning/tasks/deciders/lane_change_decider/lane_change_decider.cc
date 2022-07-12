@@ -66,6 +66,7 @@ Status LaneChangeDecider::Process(
 
   prev_status->set_is_clear_to_change_lane(false);
   if (current_reference_line_info->IsChangeLanePath()) {
+    // set prev_status true if it is safe to deviate away and come back in cur_ref_line
     prev_status->set_is_clear_to_change_lane(
         IsClearToChangeLane(current_reference_line_info));
   }
@@ -80,7 +81,7 @@ Status LaneChangeDecider::Process(
   bool has_change_lane = reference_line_info->size() > 1;
   ADEBUG << "has_change_lane: " << has_change_lane;
   if (!has_change_lane) {
-    const auto& path_id = reference_line_info->front().Lanes().Id();
+    const auto& path_id = reference_line_info->front().Lanes().Id(); // route_segments id (indicate a passage)
     if (prev_status->status() == ChangeLaneStatus::CHANGE_LANE_FINISHED) {
     } else if (prev_status->status() == ChangeLaneStatus::IN_CHANGE_LANE) {
       UpdateStatus(now, ChangeLaneStatus::CHANGE_LANE_FINISHED, path_id);
@@ -93,6 +94,7 @@ Status LaneChangeDecider::Process(
     }
     return Status::OK();
   } else {  // has change lane in reference lines.
+    // get path that vehicle locatd on
     auto current_path_id = GetCurrentPathId(*reference_line_info);
     if (current_path_id.empty()) {
       const std::string msg = "The vehicle is not on any reference line";
@@ -232,6 +234,7 @@ void LaneChangeDecider::PrioritizeChangeLane(
     }
     ++iter;
   }
+  // move iter(found) into reference_line_info(list) before first element
   reference_line_info->splice(reference_line_info->begin(),
                               *reference_line_info, iter);
   ADEBUG << "reference_line_info->IsChangeLanePath(): "

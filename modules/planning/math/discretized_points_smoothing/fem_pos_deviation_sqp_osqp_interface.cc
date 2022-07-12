@@ -348,6 +348,7 @@ FemPosDeviationSqpOsqpInterface::CalculateLinearizedFemPosParams(
   double y_m = points[index].second;
   double y_l = points[index + 1].second;
 
+  // jacobian of F(x_ref) = F'(x_ref)
   double linear_term_x_f = 2.0 * x_f - 4.0 * x_m + 2.0 * x_l;
   double linear_term_x_m = 8.0 * x_m - 4.0 * x_f - 4.0 * x_l;
   double linear_term_x_l = 2.0 * x_l - 4.0 * x_m + 2.0 * x_f;
@@ -384,18 +385,23 @@ void FemPosDeviationSqpOsqpInterface::CalculateAffineConstraint(
     columns[i].emplace_back(i, 1.0);
   }
 
+  // col: slack部分, row: kappa约束部分（后n-2行）
   for (int i = num_of_pos_variables_; i < num_of_variables_; ++i) {
     columns[i].emplace_back(i + num_of_slack_variables_, -1.0 * scale_factor);
   }
 
+  // A matrix: totally n-2 constrains(rows) and n points(or 2*n variables, 2*n cols) 
+  // 每行约束的第4,5项, 对应的point index=2~n-1
   for (int i = 2; i < num_of_points_; ++i) {
     int index = 2 * i;
+    // 这一列对应第i个点（variable x，后面是对应y）
     columns[index].emplace_back(i - 2 + num_of_variables_,
                                 lin_cache[i - 2][4] * scale_factor);
     columns[index + 1].emplace_back(i - 2 + num_of_variables_,
                                     lin_cache[i - 2][5] * scale_factor);
   }
 
+  // 每行约束的第2,3项, 对应的point index=1~n-2
   for (int i = 1; i < num_of_points_ - 1; ++i) {
     int index = 2 * i;
     columns[index].emplace_back(i - 1 + num_of_variables_,
@@ -404,6 +410,7 @@ void FemPosDeviationSqpOsqpInterface::CalculateAffineConstraint(
                                     lin_cache[i - 1][3] * scale_factor);
   }
 
+  // 每行约束的第0,1项, 对应的point index=0~n-3
   for (int i = 0; i < num_of_points_ - 2; ++i) {
     int index = 2 * i;
     columns[index].emplace_back(i + num_of_variables_,
@@ -439,13 +446,15 @@ void FemPosDeviationSqpOsqpInterface::CalculateAffineConstraint(
     (*lower_bounds)[num_of_pos_variables_ + i] = 0.0;
   }
 
+  // first part of kappa constrain: (d**2/R_min)**2
   double interval_sqr = average_interval_length_ * average_interval_length_;
   double curvature_constraint_sqr = (interval_sqr * curvature_constraint_) *
                                     (interval_sqr * curvature_constraint_);
+  // 
   for (int i = 0; i < num_of_curvature_constraints_; ++i) {
     (*upper_bounds)[num_of_variable_constraints_ + i] =
         (curvature_constraint_sqr - lin_cache[i][6]) * scale_factor;
-    (*lower_bounds)[num_of_variable_constraints_ + i] = -1e20;
+    (*lower_bounds)[num_of_variable_constraints_ + i] = -1e20; // negative kappa?
   }
 }
 

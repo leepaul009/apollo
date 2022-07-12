@@ -96,10 +96,12 @@ bool AdjustLaneChangeBackward(
         if (candidate_node == from_node) {
           continue;
         }
+        // 备选节点 存在一条到to_node的边
         if (candidate_node->GetOutEdgeTo(to_node) != nullptr) {
           candidate_set.push_back(candidate_node);
         }
       }
+      // 从备选节点中，选择最长的节点
       const auto* largest_node = GetLargestNode(candidate_set);
       if (largest_node == nullptr) {
         return false;
@@ -183,7 +185,7 @@ bool Reconstruct(
 
   auto iter = came_from.find(dest_node);
   while (iter != came_from.end()) {
-    result_node_vec.push_back(iter->second);
+    result_node_vec.push_back(iter->second); // 父节点（前驱节点）
     iter = came_from.find(iter->second);
   }
   std::reverse(result_node_vec.begin(), result_node_vec.end());
@@ -228,15 +230,17 @@ bool AStarStrategy::Search(const TopoGraph* graph,
   Clear();
   AINFO << "Start A* search algorithm.";
 
+  // 用来选取当前{from_node+f}的容器
   std::priority_queue<SearchNode> open_set_detail;
 
   SearchNode src_search_node(src_node);
   src_search_node.f = HeuristicCost(src_node, dest_node);
   open_set_detail.push(src_search_node);
 
+  // 和open_set_detail维护相同节点
   open_set_.insert(src_node);
   g_score_[src_node] = 0.0;
-  enter_s_[src_node] = src_node->StartS();
+  enter_s_[src_node] = src_node->StartS(); // node->s
 
   SearchNode current_node;
   std::unordered_set<const TopoEdge*> next_edge_set;
@@ -244,6 +248,7 @@ bool AStarStrategy::Search(const TopoGraph* graph,
   while (!open_set_detail.empty()) {
     current_node = open_set_detail.top();
     const auto* from_node = current_node.topo_node;
+    // 0. 找到终点
     if (current_node.topo_node == dest_node) {
       if (!Reconstruct(came_from_, from_node, result_nodes)) {
         AERROR << "Failed to reconstruct route.";
@@ -253,15 +258,15 @@ bool AStarStrategy::Search(const TopoGraph* graph,
     }
     open_set_.erase(from_node);
     open_set_detail.pop();
-
+    // 忽略访问过的节点
     if (closed_set_.count(from_node) != 0) {
       // if showed before, just skip...
       continue;
     }
     closed_set_.emplace(from_node);
 
-    // if residual_s is less than FLAGS_min_length_for_lane_change, only move
-    // forward
+    // if residual_s is less than FLAGS_min_length_for_lane_change, only move forward
+    // 1. 找到“邻居节点” （控制routing是否要考虑变道）
     const auto& neighbor_edges =
         (GetResidualS(from_node) > FLAGS_min_length_for_lane_change &&
          change_lane_enabled_)
@@ -271,49 +276,66 @@ bool AStarStrategy::Search(const TopoGraph* graph,
     next_edge_set.clear();
     for (const auto* edge : neighbor_edges) {
       sub_edge_set.clear();
+      // 没有black_listed_lane/road的情况下，sub_edge或者就是原始edge，
+      // 或者是终点sub_node的前驱sub_edge。
       sub_graph->GetSubInEdgesIntoSubGraph(edge, &sub_edge_set);
       next_edge_set.insert(sub_edge_set.begin(), sub_edge_set.end());
     }
 
+    // 2. 访问每一个“邻居节点”，更新其信息
     for (const auto* edge : next_edge_set) {
       const auto* to_node = edge->ToNode();
+      
+      // “访问过的”节点，不会被重新放进open_set_detail（不会再次被访问）
       if (closed_set_.count(to_node) == 1) {
         continue;
       }
       if (GetResidualS(edge, to_node) < FLAGS_min_length_for_lane_change) {
         continue;
       }
+
+      // 1. 计算cost
+      // cost = from_node_cost + edge_cost + to_node_cost (这里cost是routing map自带的)
       tentative_g_score =
           g_score_[current_node.topo_node] + GetCostToNeighbor(edge);
       if (edge->Type() != TopoEdgeType::TET_FORWARD) {
-        tentative_g_score -=
-            (edge->FromNode()->Cost() + edge->ToNode()->Cost()) / 2;
+        tentative_g_score -= (edge->FromNode()->Cost() + edge->ToNode()->Cost()) / 2;
       }
+      // f = cost2come + 启发式cost2go
       double f = tentative_g_score + HeuristicCost(to_node, dest_node);
+      // 如果to_node已经被作为“邻居”，并且to_node的新cost更大，则略过此to_node
       if (open_set_.count(to_node) != 0 && f >= g_score_[to_node]) {
         continue;
       }
+
+      // 2. 重置enter_s_
       // if to_node is reached by forward, reset enter_s to start_s
       if (edge->Type() == TopoEdgeType::TET_FORWARD) {
         enter_s_[to_node] = to_node->StartS();
       } else {
         // else, add enter_s with FLAGS_min_length_for_lane_change
+        // 用投影的方法，计算to_node上的起始位置。to_node是一个变道node
         double to_node_enter_s =
             (enter_s_[from_node] + FLAGS_min_length_for_lane_change) /
             from_node->Length() * to_node->Length();
         // enter s could be larger than end_s but should be less than length
         to_node_enter_s = std::min(to_node_enter_s, to_node->Length());
         // if enter_s is larger than end_s and to_node is dest_node
+        // ？？应该不可能发生
         if (to_node_enter_s > to_node->EndS() && to_node == dest_node) {
           continue;
         }
         enter_s_[to_node] = to_node_enter_s;
       }
 
+      // 3. 更新“邻居节点”的cost
       g_score_[to_node] = f;
       SearchNode next_node(to_node);
       next_node.f = f;
+      // 如果to_node已经被作为“邻居”，并且其cost更小，则会插入一个相同node、不同f的next_node到open_set_detail里
+      // 如果，f更好的node被访问了，那么f更差的node，因为在closed_set_里，此后不会再被访问了
       open_set_detail.push(next_node);
+      // 记录每个“邻居节点”的父节点，用于回溯
       came_from_[to_node] = from_node;
       if (open_set_.count(to_node) == 0) {
         open_set_.insert(to_node);
@@ -328,7 +350,9 @@ double AStarStrategy::GetResidualS(const TopoNode* node) {
   double start_s = node->StartS();
   const auto iter = enter_s_.find(node);
   if (iter != enter_s_.end()) {
+    // 如果enter_s_在输入node的范围之外，则residual_s=0
     if (iter->second > node->EndS()) {
+      // TODO: 合适发生？？
       return 0.0;
     }
     start_s = iter->second;
@@ -368,6 +392,7 @@ double AStarStrategy::GetResidualS(const TopoEdge* edge,
   double end_s = to_node->EndS();
   const TopoNode* succ_node = nullptr;
   for (const auto* edge : to_node->OutToAllEdge()) {
+    // 找到在相同lane上的to_node（这个node只有一个，是succ节点）
     if (edge->ToNode()->LaneId() == to_node->LaneId()) {
       succ_node = edge->ToNode();
       break;

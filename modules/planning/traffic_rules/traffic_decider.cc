@@ -115,6 +115,7 @@ void TrafficDecider::BuildPlanningTarget(
     ReferenceLineInfo *reference_line_info) {
   double min_s = std::numeric_limits<double>::infinity();
   StopPoint stop_point;
+  // ref_line_info.path_decision内的obstacle包括计算好的sl/st_boundary
   for (const auto *obstacle :
        reference_line_info->path_decision()->obstacles().Items()) {
     if (obstacle->IsVirtual() && obstacle->HasLongitudinalDecision() &&

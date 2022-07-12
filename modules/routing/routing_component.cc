@@ -84,6 +84,7 @@ bool RoutingComponent::Proc(const std::shared_ptr<RoutingRequest>& request) {
     return false;
   }
   common::util::FillHeader(node_->Name(), response.get());
+  // 写入RoutingResponse，planning_component会读取RoutingResponse
   response_writer_->Write(response);
   {
     std::lock_guard<std::mutex> guard(mutex_);

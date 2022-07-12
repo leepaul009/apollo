@@ -250,6 +250,9 @@ class PathBoundsDecider : public Decider {
 
   /** @brief Update the path_boundary at "idx"
    *         It also checks if ADC is blocked (lmax < lmin).
+   *         更新path_boundary的第idx个点对应的bound, 
+   *         在输入bound的基础上减去ego的权重乘以宽度，
+   *         左右lane border是否是road border决定了权重
    *  @param The current index of the path_bounds
    *  @param The minimum left boundary (l_max)
    *  @param The maximum right boundary (l_min)

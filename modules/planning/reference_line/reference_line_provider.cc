@@ -75,6 +75,7 @@ ReferenceLineProvider::ReferenceLineProvider(
                                          &smoother_config_))
       << "Failed to load smoother config file "
       << FLAGS_smoother_config_filename;
+  // 三种参考线平滑算法：
   if (smoother_config_.has_qp_spline()) {
     smoother_.reset(new QpSplineReferenceLineSmoother(smoother_config_));
   } else if (smoother_config_.has_spiral()) {
@@ -113,6 +114,7 @@ void ReferenceLineProvider::UpdateVehicleState(
   vehicle_state_ = vehicle_state;
 }
 
+// be called in the init step of on_lane_planning
 bool ReferenceLineProvider::Start() {
   is_stop_ = false;
   if (FLAGS_use_navigation_mode) {
@@ -143,6 +145,7 @@ void ReferenceLineProvider::Stop() {
   }
 }
 
+// 在内部变量中保存输入
 void ReferenceLineProvider::UpdateReferenceLine(
     const std::list<ReferenceLine> &reference_lines,
     const std::list<hdmap::RouteSegments> &route_segments) {
@@ -585,11 +588,13 @@ bool ReferenceLineProvider::CreateReferenceLine(
     }
   }
 
+  // segments表示多条passage
   if (!CreateRouteSegments(vehicle_state, segments)) {
     AERROR << "Failed to create reference line from routing";
     return false;
   }
   if (is_new_routing || !FLAGS_enable_reference_line_stitching) {
+    // smooth per segment
     for (auto iter = segments->begin(); iter != segments->end();) {
       reference_lines->emplace_back();
       if (!SmoothRouteSegment(*iter, &reference_lines->back())) {
@@ -642,6 +647,7 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
       AWARN << "Current route segment is not connected with previous route "
                "segment";
     }
+    // 前后的route segments连不上， 则重新生成reference_line
     return SmoothRouteSegment(*segments, reference_line);
   }
   common::SLPoint sl_point;
@@ -710,7 +716,9 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
   return Shrink(sl, reference_line, segments);
 }
 
-bool ReferenceLineProvider::Shrink(const common::SLPoint &sl,
+// 根据vehicle在reference_line上的frenet点，向前后各保留一定距离的ReferenceLine和RouteSegments,
+// 后方的距离由参数确定，前方的距离由第一个违反角度限制的参考点确认
+bool ReferenceLineProvider::Shrink(const common::SLPoint &sl, // vehicle在reference_line上的frenet点
                                    ReferenceLine *reference_line,
                                    RouteSegments *segments) {
   static constexpr double kMaxHeadingDiff = M_PI * 5.0 / 6.0;
@@ -730,12 +738,15 @@ bool ReferenceLineProvider::Shrink(const common::SLPoint &sl,
   const auto &ref_points = reference_line->reference_points();
   const double cur_heading = ref_points[index].heading();
   auto last_index = index;
+  // 找当前参考点前方的、最近的、角度差大于参数的点
   while (last_index < ref_points.size() &&
          AngleDiff(cur_heading, ref_points[last_index].heading()) <
              kMaxHeadingDiff) {
     ++last_index;
   }
   --last_index;
+  // 如果找到上述的、角度差过大的点，把当前参考点到此点的间距作为new_forward_distance
+  // 是否应该check此间距的长度？
   if (last_index != ref_points.size() - 1) {
     need_shrink = true;
     common::SLPoint forward_sl;
@@ -755,6 +766,8 @@ bool ReferenceLineProvider::Shrink(const common::SLPoint &sl,
   return true;
 }
 
+// 判断优化后的ref_line是否对于原始ref_line有较大的偏移
+// 是否应该有额外的smooth check？
 bool ReferenceLineProvider::IsReferenceLineSmoothValid(
     const ReferenceLine &raw, const ReferenceLine &smoothed) const {
   static constexpr double kReferenceLineDiffCheckStep = 10.0;
@@ -784,7 +797,7 @@ AnchorPoint ReferenceLineProvider::GetAnchorPoint(
     const ReferenceLine &reference_line, double s) const {
   AnchorPoint anchor;
   anchor.longitudinal_bound = smoother_config_.longitudinal_boundary_bound();
-  auto ref_point = reference_line.GetReferencePoint(s);
+  auto ref_point = reference_line.GetReferencePoint(s); // 通过s线性插值得到ref_point
   if (ref_point.lane_waypoints().empty()) {
     anchor.path_point = ref_point.ToPathPoint(s);
     anchor.lateral_bound = smoother_config_.max_lateral_boundary_bound();
@@ -822,7 +835,7 @@ AnchorPoint ReferenceLineProvider::GetAnchorPoint(
       effective_width = kEpislon;
       is_lane_width_safe = false;
     } else {
-      center_shift += 0.5 * smoother_config_.curb_shift();
+      center_shift += 0.5 * smoother_config_.curb_shift(); // 右手系，center左移
     }
   }
   if (hdmap::LeftBoundaryType(waypoint) == hdmap::LaneBoundaryType::CURB) {
@@ -837,6 +850,7 @@ AnchorPoint ReferenceLineProvider::GetAnchorPoint(
   }
 
   //  apply buffer if possible
+  // 不加buffer的影响？
   const double buffered_width =
       safe_lane_width - 2.0 * smoother_config_.lateral_buffer();
   safe_lane_width =
@@ -847,14 +861,22 @@ AnchorPoint ReferenceLineProvider::GetAnchorPoint(
     effective_width = 0.5 * safe_lane_width;
   }
 
-  ref_point += left_vec * center_shift;
+  ref_point += left_vec * center_shift; // ref_point左移
   anchor.path_point = ref_point.ToPathPoint(s);
+  // 用effective_width作为横向界限
+  // 作用？避免ref_line
   anchor.lateral_bound = common::math::Clamp(
       effective_width, smoother_config_.min_lateral_boundary_bound(),
       smoother_config_.max_lateral_boundary_bound());
   return anchor;
 }
 
+// 横纵向裕度的默认参数为：
+// longitudinal_boundary_bound : 2.0
+// max_lateral_boundary_bound : 0.5
+// min_lateral_boundary_bound : 0.1
+// 然后再根据自车宽度，车道边界类型（是否为curb）等再对横向裕度进行收缩。
+// AnchorPoint结构中的enforced变量表示该点是否为强约束，在参考线平滑中只有首尾两点为强约束。
 void ReferenceLineProvider::GetAnchorPoints(
     const ReferenceLine &reference_line,
     std::vector<AnchorPoint> *anchor_points) const {
@@ -896,6 +918,7 @@ bool ReferenceLineProvider::SmoothPrefixedReferenceLine(
   // modify anchor points based on prefix_ref
   for (auto &point : anchor_points) {
     common::SLPoint sl_point;
+    // raw_ref上的点、对于prefix_ref的frenet坐标
     if (!prefix_ref.XYToSL(point.path_point, &sl_point)) {
       continue;
     }
@@ -903,6 +926,8 @@ bool ReferenceLineProvider::SmoothPrefixedReferenceLine(
       continue;
     }
     auto prefix_ref_point = prefix_ref.GetNearestReferencePoint(sl_point.s());
+    // 用prefix_ref上的搜索得到的“最近的点”更新anchor_point，因为prefix_ref是平滑好的
+    // 但是有一些anchor_points不在prefix_ref上，则没有更新，需要后续做一次平滑
     point.path_point.set_x(prefix_ref_point.x());
     point.path_point.set_y(prefix_ref_point.y());
     point.path_point.set_z(0.0);
@@ -933,6 +958,7 @@ bool ReferenceLineProvider::SmoothReferenceLine(
   }
   // generate anchor points:
   std::vector<AnchorPoint> anchor_points;
+  // raw_reference_line里的点可能不是均匀分布的，anchor_points是按照0.25m采样的
   GetAnchorPoints(raw_reference_line, &anchor_points);
   smoother_->SetAnchorPoints(anchor_points);
   if (!smoother_->Smooth(raw_reference_line, reference_line)) {

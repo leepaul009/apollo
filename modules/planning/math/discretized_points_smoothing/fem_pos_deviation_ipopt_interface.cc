@@ -62,8 +62,10 @@ bool FemPosDeviationIpoptInterface::get_nlp_info(int& n, int& m, int& nnz_jac_g,
   // Indexes for variables and constraints,
   // Start index is actual first index and end index is one index after the
   // actual final index
+  // 待优化变量的offset，顺序：pos + slack
   slack_var_start_index_ = num_of_points_ * 2;
   slack_var_end_index_ = slack_var_start_index_ + num_of_slack_var_;
+  // 约束的offset，顺序：pos + curvature + slack
   curvature_constr_start_index_ = num_of_points_ * 2;
   curvature_constr_end_index_ =
       curvature_constr_start_index_ + num_of_curvature_constr_;
@@ -127,6 +129,7 @@ bool FemPosDeviationIpoptInterface::get_bounds_info(int n, double* x_l,
   double curvature_constr_upper =
       average_delta_s * average_delta_s * curvature_constraint_;
 
+  // upper = ((ds**2) * kappa)**2
   for (size_t i = curvature_constr_start_index_;
        i < curvature_constr_end_index_; ++i) {
     g_l[i] = -1e20;
@@ -142,11 +145,14 @@ bool FemPosDeviationIpoptInterface::get_bounds_info(int n, double* x_l,
   return true;
 }
 
-bool FemPosDeviationIpoptInterface::get_starting_point(int n, bool init_x,
-                                                       double* x, bool init_z,
-                                                       double* z_L, double* z_U,
-                                                       int m, bool init_lambda,
-                                                       double* lambda) {
+bool FemPosDeviationIpoptInterface::get_starting_point(int n, 
+                                                       bool init_x, // 1
+                                                       double* x,   // size=n, pos+slack variables
+                                                       bool init_z, // 0
+                                                       double* z_L, double* z_U, // size=m
+                                                       int m, 
+                                                       bool init_lambda, // 0
+                                                       double* lambda) { // size=m
   CHECK_EQ(static_cast<size_t>(n), num_of_variables_);
   for (size_t i = 0; i < num_of_points_; ++i) {
     size_t index = i * 2;
@@ -172,7 +178,7 @@ bool FemPosDeviationIpoptInterface::eval_f(int n, const double* x, bool new_x,
 bool FemPosDeviationIpoptInterface::eval_grad_f(int n, const double* x,
                                                 bool new_x, double* grad_f) {
   CHECK_EQ(static_cast<size_t>(n), num_of_variables_);
-
+  // 直接调用的adol-c中的gradient方法，可以自动求解tag_f函数的偏导数
   gradient(tag_f, n, x, grad_f);
   return true;
 }
@@ -196,7 +202,7 @@ bool FemPosDeviationIpoptInterface::eval_jac_g(int n, const double* x,
   if (values == nullptr) {
     // return the structure of the jacobian
     for (int idx = 0; idx < nnz_jac_; idx++) {
-      iRow[idx] = rind_g_[idx];
+      iRow[idx] = rind_g_[idx]; // 在generate_tapes中计算好的
       jCol[idx] = cind_g_[idx];
     }
   } else {
@@ -230,6 +236,8 @@ bool FemPosDeviationIpoptInterface::eval_h(int n, const double* x, bool new_x,
     for (int idx = 0; idx < m; idx++) {
       obj_lam_[1 + idx] = lambda[idx];
     }
+    // eval_h函数在ipopt求解器调用过程中，会动态改变目标函数系数obj_factor和约束函数系数lambda，
+    // 所以在每次调用eval_f时我们要更新拉格朗日函数的参数set_param_vec
     set_param_vec(tag_L, m + 1, &obj_lam_[0]);
     sparse_hess(tag_L, n, 1, const_cast<double*>(x), &nnz_L_, &rind_L_,
                 &cind_L_, &hessval_, options_L_);
@@ -279,6 +287,7 @@ bool FemPosDeviationIpoptInterface::eval_obj(int n, const T* x, T* obj_value) {
   }
 
   // Fem_pos_deviation
+  // “近似平滑度”的代价：(x_i-1 + x_i+1 - 2*x_i)**2 + (y_i-1 + y_i+1 - 2*y_i)**2
   for (size_t i = 0; i + 2 < num_of_points_; ++i) {
     size_t findex = i * 2;
     size_t mindex = findex + 2;
@@ -293,8 +302,8 @@ bool FemPosDeviationIpoptInterface::eval_obj(int n, const T* x, T* obj_value) {
 
   // Total length
   for (size_t i = 0; i + 1 < num_of_points_; ++i) {
-    size_t findex = i * 2;
-    size_t nindex = findex + 2;
+    size_t findex = i * 2; // var offset of prev point
+    size_t nindex = findex + 2; // var offset of next point
     *obj_value +=
         weight_path_length_ *
         ((x[findex] - x[nindex]) * (x[findex] - x[nindex]) +
@@ -310,6 +319,7 @@ bool FemPosDeviationIpoptInterface::eval_obj(int n, const T* x, T* obj_value) {
 }
 
 /** Template to compute contraints */
+// 这里将自变量的约束，作为函数写到了约束方程里，用于拉格朗日函数？
 template <class T>
 bool FemPosDeviationIpoptInterface::eval_constraints(int n, const T* x, int m,
                                                      T* g) {
@@ -321,10 +331,13 @@ bool FemPosDeviationIpoptInterface::eval_constraints(int n, const T* x, int m,
   }
 
   // b. curvature constraints
+  // curvature_constr_start_index_是曲率约束的offset
   for (size_t i = 0; i + 2 < num_of_points_; ++i) {
     size_t findex = i * 2;
     size_t mindex = findex + 2;
     size_t lindex = mindex + 2;
+    // non-lienar约束方程，供adol-c自行计算微分：
+    // (x_i-1 + x_i+1 - 2*x_i)**2 + (y_i-1 + y_i+1 - 2*y_i)**2 - var_slack_i
     g[curvature_constr_start_index_ + i] =
         (((x[findex] + x[lindex]) - 2.0 * x[mindex]) *
              ((x[findex] + x[lindex]) - 2.0 * x[mindex]) +
@@ -343,6 +356,7 @@ bool FemPosDeviationIpoptInterface::eval_constraints(int n, const T* x, int m,
 }
 
 /** Method to generate the required tapes */
+// 实现了adol-c原函数的定义
 void FemPosDeviationIpoptInterface::generate_tapes(int n, int m, int* nnz_jac_g,
                                                    int* nnz_h_lag) {
   std::vector<double> xp(n, 0.0);
@@ -359,15 +373,16 @@ void FemPosDeviationIpoptInterface::generate_tapes(int n, int m, int* nnz_jac_g,
   double dummy = 0.0;
   obj_lam_.clear();
   obj_lam_.resize(m + 1, 0.0);
+  // assign init value to variable
   get_starting_point(n, 1, &xp[0], 0, &zl[0], &zu[0], m, 0, &lamp[0]);
 
   // Trace on Objectives
   trace_on(tag_f);
   for (int idx = 0; idx < n; idx++) {
-    xa[idx] <<= xp[idx];
+    xa[idx] <<= xp[idx]; // 可以将真实值(double)传递给活动变量(adouble)
   }
-  eval_obj(n, &xa[0], &obj_value);
-  obj_value >>= dummy;
+  eval_obj(n, &xa[0], &obj_value); // 代入的也是active variable
+  obj_value >>= dummy; // 可以将活动变量传递给真实值
   trace_off();
 
   // Trace on Jacobian
@@ -391,28 +406,31 @@ void FemPosDeviationIpoptInterface::generate_tapes(int n, int m, int* nnz_jac_g,
   }
   sig = 1.0;
   eval_obj(n, &xa[0], &obj_value);
-  obj_value *= mkparam(sig);
+  obj_value *= mkparam(sig); // sigma * f(x), where f(x) is objective function
   eval_constraints(n, &xa[0], m, &g[0]);
   for (int idx = 0; idx < m; idx++) {
-    obj_value += g[idx] * mkparam(lam[idx]);
+    obj_value += g[idx] * mkparam(lam[idx]); // mkparam()将sig和lam标记为参数
   }
   obj_value >>= dummy;
   trace_off();
 
-  rind_g_ = nullptr;
-  cind_g_ = nullptr;
-  rind_L_ = nullptr;
-  cind_L_ = nullptr;
+  rind_g_ = nullptr; // row index of jac
+  cind_g_ = nullptr; // col index
+  rind_L_ = nullptr; // row index of hess
+  cind_L_ = nullptr; // col index
 
   options_g_[0] = 0; /* sparsity pattern by index domains (default) */
   options_g_[1] = 0; /*                         safe mode (default) */
   options_g_[2] = 0;
   options_g_[3] = 0; /*                column compression (default) */
 
-  jacval_ = nullptr;
-  hessval_ = nullptr;
+  jacval_ = nullptr; // double*
+  hessval_ = nullptr; // double*
 
-  sparse_jac(tag_g, m, n, 0, &xp[0], &nnz_jac_, &rind_g_, &cind_g_, &jacval_,
+  sparse_jac(tag_g, m, n, 0, &xp[0], 
+             &nnz_jac_, 
+             &rind_g_, &cind_g_, // row_ind, col_ind
+             &jacval_, // value
              options_g_);
   *nnz_jac_g = nnz_jac_;
   options_L_[0] = 0;

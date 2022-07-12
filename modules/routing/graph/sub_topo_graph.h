@@ -94,6 +94,7 @@ class SubTopoGraph {
  private:
   std::vector<std::shared_ptr<TopoNode>> topo_nodes_;
   std::vector<std::shared_ptr<TopoEdge>> topo_edges_;
+  // original_node -> sub_node
   std::unordered_map<const TopoNode*, std::vector<NodeWithRange>>
       sub_node_range_sorted_map_;
   std::unordered_map<const TopoNode*, std::unordered_set<TopoNode*>>

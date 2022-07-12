@@ -82,7 +82,7 @@ class TopoNode {
   bool FindAnchorPoint();
   void SetAnchorPoint(const common::PointENU& anchor_point);
 
-  Node pb_node_;
+  Node pb_node_; // proto定义的node
   common::PointENU anchor_point_;
 
   double start_s_;
@@ -95,11 +95,13 @@ class TopoNode {
   std::vector<NodeSRange> left_out_sorted_range_;
   std::vector<NodeSRange> right_out_sorted_range_;
 
+  // edge whose to to_node is this node
   std::unordered_set<const TopoEdge*> in_from_all_edge_set_;
   std::unordered_set<const TopoEdge*> in_from_left_edge_set_;
   std::unordered_set<const TopoEdge*> in_from_right_edge_set_;
   std::unordered_set<const TopoEdge*> in_from_left_or_right_edge_set_;
   std::unordered_set<const TopoEdge*> in_from_pre_edge_set_;
+  // edge whose from_node is this node 
   std::unordered_set<const TopoEdge*> out_to_all_edge_set_;
   std::unordered_set<const TopoEdge*> out_to_left_edge_set_;
   std::unordered_set<const TopoEdge*> out_to_right_edge_set_;

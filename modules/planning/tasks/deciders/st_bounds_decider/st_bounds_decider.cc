@@ -56,7 +56,9 @@ Status STBoundsDecider::Process(Frame* const frame,
   STBound regular_st_bound;
   STBound regular_vt_bound;
   std::vector<std::pair<double, double>> st_guide_line;
-  Status ret = GenerateRegularSTBound(&regular_st_bound, &regular_vt_bound,
+  // 计算 s、v的限制的上下界
+  Status ret = GenerateRegularSTBound(&regular_st_bound, 
+                                      &regular_vt_bound,
                                       &st_guide_line);
   if (!ret.ok()) {
     ADEBUG << "Cannot generate a regular ST-boundary.";
@@ -67,9 +69,11 @@ Status STBoundsDecider::Process(Frame* const frame,
     AERROR << msg;
     return Status(ErrorCode::PLANNING_ERROR, msg);
   }
+  // 更新ref_line_info.st_graph_data的s、v的限制的上下界
   StGraphData* st_graph_data = reference_line_info_->mutable_st_graph_data();
   st_graph_data->SetSTDrivableBoundary(regular_st_bound, regular_vt_bound);
 
+  // 调试用代码：
   // Record the ST-Graph for good visualization and easy debugging.
   auto all_st_boundaries = st_obstacles_processor_.GetAllSTBoundaries();
   std::vector<STBoundary> st_boundaries;
@@ -86,8 +90,11 @@ Status STBoundsDecider::Process(Frame* const frame,
   return Status::OK();
 }
 
+// 计算ST图中的障碍物区域，初始化st_guide_line_、st_driving_limits_
 void STBoundsDecider::InitSTBoundsDecider(
-    const Frame& frame, ReferenceLineInfo* const reference_line_info) {
+    const Frame& frame, 
+    ReferenceLineInfo* const reference_line_info) 
+{
   const PathData& path_data = reference_line_info->path_data();
   PathDecision* path_decision = reference_line_info->path_decision();
 
@@ -96,6 +103,7 @@ void STBoundsDecider::InitSTBoundsDecider(
   st_obstacles_processor_.Init(path_data.discretized_path().Length(),
                                st_bounds_config_.total_time(), path_data,
                                path_decision, injector_->history());
+  // 计算ST图中的障碍物区域，记录在st_obstacles_processor_中(如obs_t_edges_)
   st_obstacles_processor_.MapObstaclesToSTBoundaries(path_decision);
   auto time2 = std::chrono::system_clock::now();
   std::chrono::duration<double> diff = time2 - time1;
@@ -114,6 +122,8 @@ void STBoundsDecider::InitSTBoundsDecider(
   } else {
     st_guide_line_.Init(desired_speed);
   }
+
+  // TODO: 加速度、速度参数最好外置！研究此处的参数影响的范围...
   static constexpr double max_acc = 2.5;
   static constexpr double max_dec = 5.0;
   static constexpr double max_v = desired_speed * 1.5;
@@ -225,9 +235,11 @@ Status STBoundsDecider::GenerateFallbackSTBound(STBound* const st_bound,
 }
 
 Status STBoundsDecider::GenerateRegularSTBound(
-    STBound* const st_bound, STBound* const vt_bound,
+    STBound* const st_bound, 
+    STBound* const vt_bound,
     std::vector<std::pair<double, double>>* const st_guide_line) {
   // Initialize st-boundary.
+  // 间隔0.1s max=7.0s
   for (double curr_t = 0.0; curr_t <= st_bounds_config_.total_time();
        curr_t += kSTBoundsDeciderResolution) {
     st_bound->emplace_back(curr_t, std::numeric_limits<double>::lowest(),
@@ -244,6 +256,7 @@ Status STBoundsDecider::GenerateRegularSTBound(
     ADEBUG << "Processing st-boundary at t = " << t;
 
     // Get Boundary due to driving limits
+    // 用系统最大、最小加速度 计算当前t时刻的 纵向距离s的上下边界
     auto driving_limits_bound = st_driving_limits_.GetVehicleDynamicsLimits(t);
     s_lower = std::fmax(s_lower, driving_limits_bound.first);
     s_upper = std::fmin(s_upper, driving_limits_bound.second);
@@ -251,15 +264,19 @@ Status STBoundsDecider::GenerateRegularSTBound(
            << "s_upper = " << s_upper << ", s_lower = " << s_lower;
 
     // Get Boundary due to obstacles
+    // 新计算得到的 可规划区域 在obs_id_to_decision_所规定的 上下界之内
     std::vector<std::pair<double, double>> available_s_bounds;
     std::vector<ObsDecSet> available_obs_decisions;
     if (!st_obstacles_processor_.GetSBoundsFromDecisions(
-            t, &available_s_bounds, &available_obs_decisions)) {
+            t, &available_s_bounds, &available_obs_decisions)) 
+    {
       const std::string msg =
           "Failed to find a proper boundary due to obstacles.";
       AERROR << msg;
       return Status(ErrorCode::PLANNING_ERROR, msg);
     }
+
+    // 把t时刻计算的 新的s_bounds和obs_decisions 加入available_choices
     std::vector<std::pair<STBoundPoint, ObsDecSet>> available_choices;
     ADEBUG << "Available choices are:";
     for (int j = 0; j < static_cast<int>(available_s_bounds.size()); ++j) {
@@ -270,45 +287,57 @@ Status STBoundsDecider::GenerateRegularSTBound(
                           available_s_bounds[j].second),
           available_obs_decisions[j]);
     }
+    // 移除一些 规划区间，这些区间不在时刻t的driving_limits_bound范围内
     RemoveInvalidDecisions(driving_limits_bound, &available_choices);
 
-    if (!available_choices.empty()) {
+    if (!available_choices.empty()) 
+    {
+      // 排序
       ADEBUG << "One decision needs to be made among "
              << available_choices.size() << " choices.";
       double guide_line_s = st_guide_line_.GetGuideSFromT(t);
       st_guide_line->emplace_back(t, guide_line_s);
       RankDecisions(guide_line_s, driving_limits_bound, &available_choices);
+      
       // Select the top decision.
+      // 选择最优的规划区域
       auto top_choice_s_range = available_choices.front().first;
       bool is_limited_by_upper_obs = false;
       bool is_limited_by_lower_obs = false;
-      if (s_lower < std::get<1>(top_choice_s_range)) {
+      // 取更严格的界限，原本的界限由 最小最大加速度估计得到
+      if (s_lower < std::get<1>(top_choice_s_range)) 
+      {
         s_lower = std::get<1>(top_choice_s_range);
         is_limited_by_lower_obs = true;
       }
-      if (s_upper > std::get<2>(top_choice_s_range)) {
+      if (s_upper > std::get<2>(top_choice_s_range)) 
+      {
         s_upper = std::get<2>(top_choice_s_range);
         is_limited_by_upper_obs = true;
       }
-
+      
       // Set decision for obstacles without decisions.
+      // 将 最优规划区间的“障碍物决策” 放入 obs_id_to_decision_
+      // 更新obs_id_to_st_boundary_的决策类型 和 history_
       auto top_choice_decision = available_choices.front().second;
       st_obstacles_processor_.SetObstacleDecision(top_choice_decision);
 
       // Update st-guide-line, st-driving-limit info, and v-limits.
+      // 利用当前的obs_id_to_decision_，用插值法计算他们在t时刻的上下界，
+      // 再根据每个obs_decision的类型(让路或超车)，选取合适的速度上下界
       std::pair<double, double> limiting_speed_info;
-      if (st_obstacles_processor_.GetLimitingSpeedInfo(t,
-                                                       &limiting_speed_info)) {
+      if (st_obstacles_processor_.GetLimitingSpeedInfo(t, &limiting_speed_info)) 
+      {
         st_driving_limits_.UpdateBlockingInfo(
             t, s_lower, limiting_speed_info.first, s_upper,
             limiting_speed_info.second);
         st_guide_line_.UpdateBlockingInfo(t, s_lower, true);
         st_guide_line_.UpdateBlockingInfo(t, s_upper, false);
         if (is_limited_by_lower_obs) {
-          lower_obs_v = limiting_speed_info.first;
+          lower_obs_v = limiting_speed_info.first; // 速度下界
         }
         if (is_limited_by_upper_obs) {
-          upper_obs_v = limiting_speed_info.second;
+          upper_obs_v = limiting_speed_info.second; // 速度上界
         }
       }
     } else {
@@ -320,7 +349,7 @@ Status STBoundsDecider::GenerateRegularSTBound(
     // Update into st_bound
     st_bound->at(i) = std::make_tuple(t, s_lower, s_upper);
     vt_bound->at(i) = std::make_tuple(t, lower_obs_v, upper_obs_v);
-  }
+  } // end for loop for each timestamp
 
   return Status::OK();
 }
@@ -376,6 +405,7 @@ void STBoundsDecider::RankDecisions(
                       std::fmax(driving_limit.first, A_s_lower);
       double B_room = std::fmin(driving_limit.second, B_s_upper) -
                       std::fmax(driving_limit.first, B_s_lower);
+      // kSTPassableThreshold = 3.0
       if (A_room < kSTPassableThreshold || B_room < kSTPassableThreshold) {
         if (A_room < B_room) {
           swap(available_choices->at(i + 1), available_choices->at(i));

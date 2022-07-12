@@ -27,12 +27,15 @@ void TopoGraph::Clear() {
   node_index_map_.clear();
 }
 
+// 用输入graph的node构造topo_node，创建map（lane_id到topo_node_id）
+// 每个topo_node得到了输入node的信息，并且选择最长的l/r_out作为l/r_out_range
 bool TopoGraph::LoadNodes(const Graph& graph) {
   if (graph.node().empty()) {
     AERROR << "No nodes found in topology graph.";
     return false;
   }
   for (const auto& node : graph.node()) {
+    // lane_id ==> topo_node的id
     node_index_map_[node.lane_id()] = static_cast<int>(topo_nodes_.size());
     std::shared_ptr<TopoNode> topo_node;
     topo_node.reset(new TopoNode(node));
@@ -66,6 +69,7 @@ bool TopoGraph::LoadEdges(const Graph& graph) {
   return true;
 }
 
+// 输入graph ex.: data/demo/routing_map.txt
 bool TopoGraph::LoadGraph(const Graph& graph) {
   Clear();
 
@@ -76,6 +80,7 @@ bool TopoGraph::LoadGraph(const Graph& graph) {
     AERROR << "Failed to load nodes from topology graph.";
     return false;
   }
+  // 输入graph的edge可以为空
   if (!LoadEdges(graph)) {
     AERROR << "Failed to load edges from topology graph.";
     return false;

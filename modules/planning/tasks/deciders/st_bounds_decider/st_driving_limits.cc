@@ -36,10 +36,12 @@ void STDrivingLimits::Init(const double max_acc, const double max_dec,
   lower_s0_ = 0.0;
 }
 
+// 计算距离s的上下界
 std::pair<double, double> STDrivingLimits::GetVehicleDynamicsLimits(
     const double t) const {
   std::pair<double, double> dynamic_limits;
   // Process lower bound: (constant deceleration)
+  // 以min_acc减速为0，t时刻的s下界
   double dec_time = lower_v0_ / max_dec_;
   if (t - lower_t0_ < dec_time) {
     dynamic_limits.first =
@@ -50,6 +52,7 @@ std::pair<double, double> STDrivingLimits::GetVehicleDynamicsLimits(
   }
 
   // Process upper bound: (constant acceleration)
+  // 以max_acc加速到max_speed，t时刻的s上界
   double acc_time = (max_v_ - upper_v0_) / max_acc_;
   if (t - upper_t0_ < acc_time) {
     dynamic_limits.second =

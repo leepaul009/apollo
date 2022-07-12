@@ -160,8 +160,8 @@ class PncMap {
  private:
   routing::RoutingResponse routing_;
   struct RouteIndex {
-    LaneSegment segment;
-    std::array<int, 3> index;
+    LaneSegment segment; // 定义于path.h, 仅和routing.proto中的LaneSegment类似
+    std::array<int, 3> index; // routing内的road_index, passage_index, lane_index
   };
   std::vector<RouteIndex> route_indices_;
   int range_start_ = 0;
@@ -174,8 +174,8 @@ class PncMap {
    * The routing request waypoints
    */
   struct WaypointIndex {
-    LaneWaypoint waypoint;
-    int index;
+    LaneWaypoint waypoint; // 定义在path.h, laneSegment上的frenet坐标
+    int index; // 在route_indices_中的laneSegment序号
     WaypointIndex(const LaneWaypoint &waypoint, int index)
         : waypoint(waypoint), index(index) {}
   };

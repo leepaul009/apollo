@@ -50,6 +50,7 @@ bool DiscretePointsReferenceLineSmoother::Smooth(
   anchorpoints_lateralbound.front() = 0.0;
   anchorpoints_lateralbound.back() = 0.0;
 
+  // do norm based on first point of raw_point2d
   NormalizePoints(&raw_point2d);
 
   bool status = false;
@@ -207,7 +208,7 @@ void DiscretePointsReferenceLineSmoother::DeNormalizePoints(
 
 bool DiscretePointsReferenceLineSmoother::GenerateRefPointProfile(
     const ReferenceLine& raw_reference_line,
-    const std::vector<std::pair<double, double>>& xy_points,
+    const std::vector<std::pair<double, double>>& xy_points, // optimized points
     std::vector<ReferencePoint>* reference_points) {
   // Compute path profile
   std::vector<double> headings;
@@ -228,11 +229,13 @@ bool DiscretePointsReferenceLineSmoother::GenerateRefPointProfile(
       return false;
     }
     const double kEpsilon = 1e-6;
+    // 超过raw_reference_line的边界
     if (ref_sl_point.s() < -kEpsilon ||
         ref_sl_point.s() > raw_reference_line.Length()) {
       continue;
     }
     ref_sl_point.set_s(std::max(ref_sl_point.s(), 0.0));
+    // 更新ref_point的waypoint(frenet frame)
     ReferencePoint rlp = raw_reference_line.GetReferencePoint(ref_sl_point.s());
     auto new_lane_waypoints = rlp.lane_waypoints();
     for (auto& lane_waypoint : new_lane_waypoints) {

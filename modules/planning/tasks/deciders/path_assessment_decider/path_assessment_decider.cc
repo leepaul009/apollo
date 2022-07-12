@@ -48,6 +48,7 @@ PathAssessmentDecider::PathAssessmentDecider(
     const std::shared_ptr<DependencyInjector>& injector)
     : Decider(config, injector) {}
 
+// 选择最优的轨迹，存储一些信息给下一个cycle使用
 Status PathAssessmentDecider::Process(
     Frame* const frame, ReferenceLineInfo* const reference_line_info) {
   // Sanity checks.
@@ -102,6 +103,7 @@ Status PathAssessmentDecider::Process(
       }
       continue;
     }
+    // 更新curr_path_data内每个点的PathPointDecision，用在speed decider？
     SetPathInfo(*reference_line_info, &curr_path_data);
     // Trim all the lane-borrowing paths so that it ends with an in-lane
     // position.
@@ -129,6 +131,7 @@ Status PathAssessmentDecider::Process(
     ADEBUG << "For " << curr_path_data.path_label() << ", "
            << "path length = " << curr_path_data.frenet_frame_path().size();
   }
+
   valid_path_data.resize(cnt);
   // If there is no valid path_data, exit.
   if (valid_path_data.empty()) {
@@ -159,17 +162,20 @@ Status PathAssessmentDecider::Process(
   diff = end_time3 - end_time2;
   ADEBUG << "Time for optimal path selection: " << diff.count() * 1000
          << " msec.";
-
+  // 但是也会保存所有valid path
   reference_line_info->SetCandidatePathData(std::move(valid_path_data));
 
   // 4. Update necessary info for lane-borrow decider's future uses.
   // Update front static obstacle's info.
+  // 统计前方静态障碍物的出现cycle次数 作用？
   auto* mutable_path_decider_status = injector_->planning_context()
                                           ->mutable_planning_status()
                                           ->mutable_path_decider();
   if (reference_line_info->GetBlockingObstacle() != nullptr) {
     int front_static_obstacle_cycle_counter =
         mutable_path_decider_status->front_static_obstacle_cycle_counter();
+    // 前方静态障碍物 连续存在的cycle cnt
+    // 前方静态障碍物cycle cnt的范围=[0, 10]
     mutable_path_decider_status->set_front_static_obstacle_cycle_counter(
         std::max(front_static_obstacle_cycle_counter, 0));
     mutable_path_decider_status->set_front_static_obstacle_cycle_counter(
@@ -179,6 +185,8 @@ Status PathAssessmentDecider::Process(
   } else {
     int front_static_obstacle_cycle_counter =
         mutable_path_decider_status->front_static_obstacle_cycle_counter();
+    // 前方静态障碍物 连续不存在的cycle cnt
+    // 前方静态障碍物cycle cnt的范围=[-10, 0]
     mutable_path_decider_status->set_front_static_obstacle_cycle_counter(
         std::min(front_static_obstacle_cycle_counter, 0));
     mutable_path_decider_status->set_front_static_obstacle_cycle_counter(
@@ -186,6 +194,7 @@ Status PathAssessmentDecider::Process(
   }
 
   // Update self-lane usage info.
+  // 统计able_to_use_self_lane_counter
   if (reference_line_info->path_data().path_label().find("self") !=
       std::string::npos) {
     // && std::get<1>(reference_line_info->path_data()
@@ -193,7 +202,7 @@ Status PathAssessmentDecider::Process(
     //                 .front()) == PathData::PathPointType::IN_LANE)
     int able_to_use_self_lane_counter =
         mutable_path_decider_status->able_to_use_self_lane_counter();
-
+    // able_to_use_self_lane_counter范围=[0, 10]
     if (able_to_use_self_lane_counter < 0) {
       able_to_use_self_lane_counter = 0;
     }
@@ -210,15 +219,18 @@ Status PathAssessmentDecider::Process(
     const auto& path_decider_status =
         injector_->planning_context()->planning_status().path_decider();
     for (const auto& lane_borrow_direction :
-         path_decider_status.decided_side_pass_direction()) {
+         path_decider_status.decided_side_pass_direction()) 
+    {
       if (lane_borrow_direction == PathDeciderStatus::LEFT_BORROW &&
           reference_line_info->path_data().path_label().find("left") !=
-              std::string::npos) {
+              std::string::npos) 
+      {
         left_borrow = true;
       }
       if (lane_borrow_direction == PathDeciderStatus::RIGHT_BORROW &&
           reference_line_info->path_data().path_label().find("right") !=
-              std::string::npos) {
+              std::string::npos) 
+      {
         right_borrow = true;
       }
     }
@@ -289,6 +301,7 @@ bool ComparePathData(const PathData& lhs, const PathData& rhs,
   int rhs_on_reverse =
       ContainsOutOnReverseLane(rhs.path_point_decision_guide());
   // TODO(jiacheng): make this a flag.
+  // 在对向车道
   if (std::abs(lhs_on_reverse - rhs_on_reverse) > 6) {
     return lhs_on_reverse < rhs_on_reverse;
   }
@@ -373,6 +386,7 @@ bool PathAssessmentDecider::IsValidRegularPath(
   return true;
 }
 
+// fall back轨迹可以和静态障碍物有collision，可以停在“对向车道”上，是否不妥？
 bool PathAssessmentDecider::IsValidFallbackPath(
     const ReferenceLineInfo& reference_line_info, const PathData& path_data) {
   // Basic sanity checks.
@@ -452,6 +466,7 @@ void PathAssessmentDecider::TrimTailingOutLanePoints(
   path_data->SetPathPointDecisionGuide(std::move(path_point_decision));
 }
 
+// path_data每个点相对于ref_line的横向距离是否超过限制
 bool PathAssessmentDecider::IsGreatlyOffReferenceLine(
     const PathData& path_data) {
   static constexpr double kOffReferenceLineThreshold = 20.0;
@@ -466,6 +481,7 @@ bool PathAssessmentDecider::IsGreatlyOffReferenceLine(
   return false;
 }
 
+// path_data每个点是否超过 其对应的road width限制
 bool PathAssessmentDecider::IsGreatlyOffRoad(
     const ReferenceLineInfo& reference_line_info, const PathData& path_data) {
   static constexpr double kOffRoadThreshold = 10.0;
@@ -504,7 +520,7 @@ bool PathAssessmentDecider::IsCollidingWithStaticObstacles(
         kMinObstacleArea) {
       continue;
     }
-    // Convert into polygon and save it.
+    // Convert into polygon and save it. frenet点 左下方点 逆时针
     obstacle_polygons.push_back(
         Polygon2d({Vec2d(obstacle_sl.start_s(), obstacle_sl.start_l()),
                    Vec2d(obstacle_sl.start_s(), obstacle_sl.end_l()),
@@ -513,6 +529,7 @@ bool PathAssessmentDecider::IsCollidingWithStaticObstacles(
   }
 
   // Go through all the four corner points at every path pt, check collision.
+  // 取轨迹上的每个点 对应的box的四个角点 判断是否和静态障碍物有重合部分
   for (size_t i = 0; i < path_data.discretized_path().size(); ++i) {
     if (path_data.frenet_frame_path().back().s() -
             path_data.frenet_frame_path()[i].s() <
@@ -524,6 +541,7 @@ bool PathAssessmentDecider::IsCollidingWithStaticObstacles(
     const auto& vehicle_box =
         common::VehicleConfigHelper::Instance()->GetBoundingBox(path_point);
     std::vector<Vec2d> ABCDpoints = vehicle_box.GetAllCorners();
+    // 只考虑frenet点是否会出现banana problem？
     for (const auto& corner_point : ABCDpoints) {
       // For each corner point, project it onto reference_line
       common::SLPoint curr_point_sl;
@@ -562,9 +580,10 @@ bool PathAssessmentDecider::IsStopOnReverseNeighborLane(
   }
 
   double check_s = 0.0;
-  static constexpr double kLookForwardBuffer =
-      5.0;  // filter out sidepass stop fence
+  // filter out sidepass stop fence
+  static constexpr double kLookForwardBuffer = 5.0;
   const double adc_end_s = reference_line_info.AdcSlBoundary().end_s();
+  // 推测：stop点是顺序存储的，由近到远
   for (const auto& stop_point_sl : all_stop_point_sl) {
     if (stop_point_sl.s() - adc_end_s < kLookForwardBuffer) {
       continue;
@@ -597,8 +616,11 @@ bool PathAssessmentDecider::IsStopOnReverseNeighborLane(
 
   hdmap::Id neighbor_lane_id;
   double neighbor_lane_width = 0.0;
+  
   if (path_data.path_label().find("left") != std::string::npos &&
       path_point_sl.l() > lane_left_width) {
+    // 首先，轨迹点在当前“ref lane”的左侧车道上
+    // 通过轨迹点的longitudinal s值找到投影的左侧车道类型为“left reverse”
     if (reference_line_info.GetNeighborLaneInfo(
             ReferenceLineInfo::LaneType::LeftReverse, path_point_sl.s(),
             &neighbor_lane_id, &neighbor_lane_width)) {
@@ -619,6 +641,7 @@ bool PathAssessmentDecider::IsStopOnReverseNeighborLane(
   return false;
 }
 
+// 初始化path point decision的frenet s值
 void PathAssessmentDecider::InitPathPointDecision(
     const PathData& path_data,
     std::vector<PathPointDecision>* const path_point_decision) {
@@ -654,6 +677,7 @@ void PathAssessmentDecider::SetPathPointType(
       ego_length / 2.0 - ego_back_to_center;
 
   bool is_prev_point_out_lane = false;
+  // 为每一个轨迹点赋值PathPointType
   for (size_t i = 0; i < discrete_path.size(); ++i) {
     const auto& rear_center_path_point = discrete_path[i];
     const double ego_theta = rear_center_path_point.theta();
@@ -668,6 +692,7 @@ void PathAssessmentDecider::SetPathPointType(
       ADEBUG << "Unable to get SL-boundary of ego-vehicle.";
       continue;
     }
+
     double lane_left_width = 0.0;
     double lane_right_width = 0.0;
     double middle_s =
@@ -685,6 +710,7 @@ void PathAssessmentDecider::SetPathPointType(
         // out-of-lane.
         if (ego_sl_boundary.start_l() > lane_left_width ||
             ego_sl_boundary.end_l() < -lane_right_width) {
+          // ego还在original lane sequence上
           // This means that ADC hasn't started lane-change yet.
           std::get<1>((*path_point_decision)[i]) =
               PathData::PathPointType::IN_LANE;
@@ -693,6 +719,7 @@ void PathAssessmentDecider::SetPathPointType(
                    ego_sl_boundary.end_l() <
                        lane_left_width - back_to_inlane_extra_buffer) {
           // This means that ADC has safely completed lane-change with margin.
+          // ego在target lane sequence上
           std::get<1>((*path_point_decision)[i]) =
               PathData::PathPointType::IN_LANE;
         } else {
@@ -707,7 +734,8 @@ void PathAssessmentDecider::SetPathPointType(
         if (ego_sl_boundary.end_l() >
                 lane_left_width + in_and_out_lane_hysteresis_buffer ||
             ego_sl_boundary.start_l() <
-                -lane_right_width - in_and_out_lane_hysteresis_buffer) {
+                -lane_right_width - in_and_out_lane_hysteresis_buffer) 
+        {
           if (path_data.path_label().find("reverse") != std::string::npos) {
             std::get<1>((*path_point_decision)[i]) =
                 PathData::PathPointType::OUT_ON_REVERSE_LANE;

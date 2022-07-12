@@ -599,6 +599,7 @@ void CosThetaIpoptInterface::hessian_strcuture() {
 template <class T>
 bool CosThetaIpoptInterface::eval_obj(int n, const T* x, T* obj_value) {
   *obj_value = 0.0;
+  // 相对原始点偏移的代价
   for (size_t i = 0; i < num_of_points_; ++i) {
     size_t index = i << 1;
     *obj_value +=
@@ -607,6 +608,9 @@ bool CosThetaIpoptInterface::eval_obj(int n, const T* x, T* obj_value) {
          (x[index + 1] - ref_points_[i].second) *
              (x[index + 1] - ref_points_[i].second));
   }
+  // 平滑度代价
+  // numerator: (x_i - x_i-1)*(x_i+1 - x_i) + (y_i - y_i-1)*(y_i+1 - y_i)
+  // denominator: sqrt( (x_i - x_i-1)**2 + (y_i - y_i-1)**2 ) * sqrt( (x_i+1 - x_i)**2 + (y_i+1 - y_i)**2 )
   for (size_t i = 0; i < num_of_points_ - 2; ++i) {
     size_t findex = i << 1;
     size_t mindex = findex + 2;

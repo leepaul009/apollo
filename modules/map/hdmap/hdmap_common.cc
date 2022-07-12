@@ -142,6 +142,7 @@ void LaneInfo::Init() {
     sampled_right_width_.emplace_back(sample.s(), sample.width());
   }
 
+  // check feasibility of lane width
   if (lane_.has_type()) {
     if (lane_.type() == Lane::CITY_DRIVING) {
       for (const auto &p : sampled_left_width_) {

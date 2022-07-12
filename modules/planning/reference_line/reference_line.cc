@@ -292,6 +292,7 @@ std::vector<ReferencePoint> ReferenceLine::GetReferencePoints(
   return ref_points;
 }
 
+// 线性插值，kappa，dkappa也是线性
 ReferencePoint ReferenceLine::GetReferencePoint(const double s) const {
   const auto& accumulated_s = map_path_.accumulated_s();
   if (s < accumulated_s.front() - 1e-2) {
@@ -635,6 +636,7 @@ bool ReferenceLine::GetApproximateSLBoundary(
 
   auto projected_point = map_path_.GetSmoothPoint(s);
   auto rotated_box = box;
+  // return box related to projected_point(projected on path of ref line)
   rotated_box.RotateFromCenter(-projected_point.heading());
 
   std::vector<common::math::Vec2d> corners;
@@ -660,6 +662,7 @@ bool ReferenceLine::GetApproximateSLBoundary(
   return true;
 }
 
+// box: could be obstacle bbox
 bool ReferenceLine::GetSLBoundary(const common::math::Box2d& box,
                                   SLBoundary* const sl_boundary) const {
   double start_s(std::numeric_limits<double>::max());
@@ -704,6 +707,7 @@ bool ReferenceLine::GetSLBoundary(const common::math::Box2d& box,
     *sl_boundary->add_boundary_point() = sl_corners[index0];
 
     // sl_point is outside of polygon; add to the vertex list
+    // v0 x v1
     if (v0.CrossProd(v1) < 0.0) {
       *sl_boundary->add_boundary_point() = sl_point_mid;
     }

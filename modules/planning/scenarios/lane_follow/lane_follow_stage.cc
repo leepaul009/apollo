@@ -116,9 +116,10 @@ Stage::StageStatus LaneFollowStage::Process(
         PlanOnReferenceLine(planning_start_point, frame, &reference_line_info);
 
     if (cur_status.ok()) {
+      // the vehicle is not on current RouteSegment, thus a change lane action
       if (reference_line_info.IsChangeLanePath()) {
         ADEBUG << "reference line is lane change ref.";
-        ADEBUG << "FLAGS_enable_smarter_lane_change: "
+        ADEBUG << "FLAGS_enable_smarter_lane_change: 55"
                << FLAGS_enable_smarter_lane_change;
         if (reference_line_info.Cost() < kStraightForwardLineCost &&
             (LaneChangeDecider::IsClearToChangeLane(&reference_line_info) ||
@@ -150,6 +151,7 @@ Stage::StageStatus LaneFollowStage::Process(
                                      : StageStatus::ERROR;
 }
 
+// Plan on single reference line
 Status LaneFollowStage::PlanOnReferenceLine(
     const TrajectoryPoint& planning_start_point, Frame* frame,
     ReferenceLineInfo* reference_line_info) {

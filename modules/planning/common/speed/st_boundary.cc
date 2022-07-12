@@ -94,8 +94,8 @@ STBoundary STBoundary::CreateInstanceAccurate(
   std::vector<std::pair<STPoint, STPoint>> point_pairs;
   for (size_t i = 0; i < lower_points.size(); ++i) {
     point_pairs.emplace_back(
-        STPoint(lower_points.at(i).s(), lower_points.at(i).t()),
-        STPoint(upper_points.at(i).s(), upper_points.at(i).t()));
+        STPoint(lower_points.at(i).s(), lower_points.at(i).t()),  // t时刻下限点
+        STPoint(upper_points.at(i).s(), upper_points.at(i).t())); // t时刻上限点
   }
   return STBoundary(point_pairs, true);
 }
@@ -168,6 +168,7 @@ bool STBoundary::GetUnblockSRange(const double curr_time, double* s_upper,
   return true;
 }
 
+// 通过时间curr_time，插值计算上下界
 bool STBoundary::GetBoundarySRange(const double curr_time, double* s_upper,
                                    double* s_lower) const {
   CHECK_NOTNULL(s_upper);

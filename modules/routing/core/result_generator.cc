@@ -46,6 +46,8 @@ const NodeWithRange& GetLargestRange(
   return node_vec[result_idx];
 }
 
+// 对于passage内的节点，他们之间的edge都是forward关系，
+// 前一个passage的最后节点，和后一个passage的首个节点，他们之间是变道关系
 bool ResultGenerator::ExtractBasicPassages(
     const std::vector<NodeWithRange>& nodes,
     std::vector<PassageInfo>* const passages) {
@@ -53,7 +55,9 @@ bool ResultGenerator::ExtractBasicPassages(
   passages->clear();
   std::vector<NodeWithRange> nodes_of_passage;
   nodes_of_passage.push_back(nodes.at(0));
-  for (size_t i = 1; i < nodes.size(); ++i) {
+  for (size_t i = 1; i < nodes.size(); ++i) 
+  {
+    // 得到节点i-1到节点i的边
     auto edge =
         nodes.at(i - 1).GetTopoNode()->GetOutEdgeTo(nodes.at(i).GetTopoNode());
     if (edge == nullptr) {
@@ -61,6 +65,8 @@ bool ResultGenerator::ExtractBasicPassages(
              << " to " << nodes.at(i).LaneId();
       return false;
     }
+    // 如果节点i-1到节点i的边 是变道，
+    // 则保存当前passage，标记“它到下一个passage的关系”是左或右变道
     if (edge->Type() == TET_LEFT || edge->Type() == TET_RIGHT) {
       auto change_lane_type = LEFT;
       if (edge->Type() == TET_RIGHT) {
@@ -80,6 +86,7 @@ bool ResultGenerator::IsReachableFromWithChangeLane(
     NodeWithRange* reachable_node) {
   for (const auto& to_node : to_nodes.nodes) {
     auto edge = to_node.GetTopoNode()->GetInEdgeFrom(from_node);
+    // 存在一条从from_node到to_node的edge，并且其类型是变道
     if (edge != nullptr &&
         (edge->Type() == TET_LEFT || edge->Type() == TET_RIGHT)) {
       *reachable_node = to_node;
@@ -167,13 +174,17 @@ void ResultGenerator::ExtendBackward(const TopoRangeManager& range_manager,
 void ResultGenerator::ExtendForward(const TopoRangeManager& range_manager,
                                     const PassageInfo& next_passage,
                                     PassageInfo* const curr_passage) {
+  // 维护了当前passage的节点、以及向前方扩展的节点
   std::unordered_set<const TopoNode*> node_set_of_curr_passage;
   for (const auto& node : curr_passage->nodes) {
     node_set_of_curr_passage.insert(node.GetTopoNode());
   }
+
+  // 如果back_node是次节点，则更新它的endS
   auto& back_node = curr_passage->nodes.back();
-  if (!IsCloseEnough(back_node.EndS(), back_node.FullLength())) {
-    if (!range_manager.Find(back_node.GetTopoNode())) {
+  if (!IsCloseEnough(back_node.EndS(), back_node.FullLength())) { // 说明back_node是次节点
+    if (!range_manager.Find(back_node.GetTopoNode())) { // 次节点不可能在range_manager里（只存储起止节点和black_listed节点）
+
       if (IsCloseEnough(next_passage.nodes.back().EndS(),
                         next_passage.nodes.back().FullLength())) {
         back_node.SetEndS(back_node.FullLength());
@@ -193,18 +204,22 @@ void ResultGenerator::ExtendForward(const TopoRangeManager& range_manager,
     }
   }
 
+  // 扩展curr_passage
   bool allowed_to_explore = true;
   while (allowed_to_explore) {
     std::vector<NodeWithRange> succ_set;
+    // 访问curr_passage的末尾节点 的后继节点
     for (const auto& edge :
          curr_passage->nodes.back().GetTopoNode()->OutToSucEdge()) {
       const auto& succ_node = edge->ToNode();
       // if succ node has been inserted
+      // 已经被扩展的后继节点 需要被忽略
       if (ContainsKey(node_set_of_curr_passage, succ_node)) {
         continue;
       }
       // if next passage is reachable from succ node
       NodeWithRange reachable_node(succ_node, 0, 1.0);
+      // 可以找到从succ_node到next_passage的edge（edge对应的next_passage上的节点、即reachable_node）
       if (IsReachableFromWithChangeLane(succ_node, next_passage,
                                         &reachable_node)) {
         const auto* succ_range = range_manager.Find(succ_node);
@@ -225,12 +240,13 @@ void ResultGenerator::ExtendForward(const TopoRangeManager& range_manager,
           }
         }
       }
-    }
+    } // end for loop for to_node
     if (succ_set.empty()) {
       allowed_to_explore = false;
     } else {
       allowed_to_explore = true;
       const auto& node_to_insert = GetLargestRange(succ_set);
+      // 在cur_passage末尾加入新的节点，以继续扩展
       curr_passage->nodes.push_back(node_to_insert);
       node_set_of_curr_passage.emplace(node_to_insert.GetTopoNode());
     }
@@ -241,13 +257,17 @@ void ResultGenerator::ExtendPassages(const TopoRangeManager& range_manager,
                                      std::vector<PassageInfo>* const passages) {
   int passage_num = static_cast<int>(passages->size());
   for (int i = 0; i < passage_num; ++i) {
+    // passage不是最后一个
     if (i < passage_num - 1) {
       ExtendForward(range_manager, passages->at(i + 1), &(passages->at(i)));
     }
+    // passage不是第一个
     if (i > 0) {
       ExtendBackward(range_manager, passages->at(i - 1), &(passages->at(i)));
     }
   }
+  // 很多多余操作，但又是必要的，比如后一条passage扩展后，前一个passage也会被扩展（前一次forloop覆盖不了这种情况）
+  // TODO: 但是有更好的办法解决这种问题 => 直接把“平行lane segment”都放入routing结果里
   for (int i = passage_num - 1; i >= 0; --i) {
     if (i < passage_num - 1) {
       ExtendForward(range_manager, passages->at(i + 1), &(passages->at(i)));
@@ -315,12 +335,21 @@ bool ResultGenerator::GeneratePassageRegion(
 }
 
 bool ResultGenerator::GeneratePassageRegion(
-    const std::vector<NodeWithRange>& nodes,
-    const TopoRangeManager& range_manager, RoutingResponse* const result) {
+    const std::vector<NodeWithRange>& nodes, // result node from routing
+    const TopoRangeManager& range_manager, // 维护了node到range的映射
+    RoutingResponse* const result) {
   std::vector<PassageInfo> passages;
+  // 用LC_edge给节点分组，分其成为不同的passage
   if (!ExtractBasicPassages(nodes, &passages)) {
     return false;
   }
+  // 目前，ExtractBasicPassages只在两个node是变道关系时，才生成新的passage，
+  // 根据后一个passage扩展前一个passage（其实就是增加平行节点）
+  /* 三车道case：
+  * | | |o|    |x|x|o|
+  * | | |o| => |x|x|o|
+  * |o|o|o|    |o|o|o|, where 'x' is extended node
+  */
   ExtendPassages(range_manager, &passages);
 
   CreateRoadSegments(passages, result);
@@ -330,21 +359,31 @@ bool ResultGenerator::GeneratePassageRegion(
 
 void ResultGenerator::AddRoadSegment(
     const std::vector<PassageInfo>& passages,
-    const std::pair<std::size_t, std::size_t>& start_index,
+    const std::pair<std::size_t, std::size_t>& start_index, // passage id 和 node id?
     const std::pair<std::size_t, std::size_t>& end_index,
     RoutingResponse* result) {
   auto* road = result->add_road();
 
+  // 创建新road（实际上是RoadSegment），赋予当前节点的road_id
   road->set_id(passages[start_index.first].nodes[start_index.second].RoadId());
+
   for (std::size_t i = start_index.first;
-      i <= end_index.first && i < passages.size(); ++i) {
+      i <= end_index.first && i < passages.size(); ++i)
+  {
     auto* passage = road->add_passage();
+
+    // 1. 得到当前passage-i的首节点，
+    // start_index的开始节点是其记录的节点，end_index、和之间的passage的开始节点是第一个
     const size_t node_start_index =
         (i == start_index.first ?
-        std::max((std::size_t)0, start_index.second) : 0);
+          std::max((std::size_t)0, start_index.second) 
+          : 0);
     const auto node_begin_iter = passages[i].nodes.cbegin() + node_start_index;
     ADEBUG<< "start node: " << node_begin_iter->LaneId() << ": "
            << node_begin_iter->StartS() << "; " << node_begin_iter->EndS();
+    
+    // 2. 得到当前passage-i的末尾节点，
+    // start_index、和之间的passage的结尾节点是最后一个，end_index的结尾结点是其记录的
     const size_t node_end_index =
          (i == end_index.first ?
          std::min(end_index.second, passages[i].nodes.size() - 1) :
@@ -352,27 +391,39 @@ void ResultGenerator::AddRoadSegment(
     const auto node_last_iter = passages[i].nodes.cbegin() + node_end_index;
     ADEBUG << "last node: " << node_last_iter->LaneId() << ": "
            << node_last_iter->StartS() << "; " << node_last_iter->EndS();
+    
+    // 把passage-i上的start到end的所有节点放入passage-i中，一个节点作为一个LaneSegment
     auto node_end_iter = node_last_iter + 1;
     LaneNodesToPassageRegion(node_begin_iter, node_end_iter, passage);
+
+    // 两个新passage的id如果相等，则他们是forward关系；不相等则是变道关系
     if (start_index.first == end_index.first) {
+      // 只有一个passage时
       passage->set_change_lane_type(FORWARD);
       passage->set_can_exit(true);
     } else {
+      // type：除了最后一个passage是forward，其他passage是变道类型
       passage->set_change_lane_type(passages[i].change_lane_type);
+      // 最后一个passage的can_exit=true
       passage->set_can_exit(i == end_index.first);
     }
   }
 }
 
 void ResultGenerator::CreateRoadSegments(
-    const std::vector<PassageInfo>& passages, RoutingResponse* result) {
+    const std::vector<PassageInfo>& passages, RoutingResponse* result) 
+{
   ACHECK(!passages.empty()) << "passages empty";
   NodeWithRange fake_node_range(passages.front().nodes.front());
   bool in_change_lane = false;
   std::pair<std::size_t, std::size_t> start_index(0, 0);
-  for (std::size_t i = 0; i < passages.size(); ++i) {
+  for (std::size_t i = 0; i < passages.size(); ++i) 
+  {
     const auto& curr_nodes = passages[i].nodes;
-    for (std::size_t j = 0; j < curr_nodes.size(); ++j) {
+    for (std::size_t j = 0; j < curr_nodes.size(); ++j) 
+    {
+      // 如果 能在passage[i+1]上找到node 满足此node有“变道edge”至cur_node[j]
+      // 或者 能在passage[i-1]上找到node 满足cur_node[j] -LC-> node
       if ((i + 1 < passages.size() &&
            IsReachableToWithChangeLane(curr_nodes[j].GetTopoNode(),
                                        passages[i + 1], &fake_node_range)) ||
@@ -383,13 +434,14 @@ void ResultGenerator::CreateRoadSegments(
           start_index = {i, j};
           in_change_lane = true;
         }
-      } else {
+      } else { // 在前一个、后一个passage中找不到变道关系
         if (in_change_lane) {
           ADEBUG << "start_index(" << start_index.first << ", "
                  << start_index.second
                  << ") end_index(" << i << ", " << j - 1 << ")";
           AddRoadSegment(passages, start_index, {i, j - 1}, result);
         }
+        // 为 passage[i].nodes[j]创建road_segment
         ADEBUG << "start_index(" << i << ", " << j
                << ") end_index(" << i << ", " << j << ")";
         AddRoadSegment(passages, {i, j}, {i, j}, result);
@@ -401,6 +453,7 @@ void ResultGenerator::CreateRoadSegments(
     ADEBUG << "start_index(" << start_index.first << ", " << start_index.second
            << ") end_index(" << passages.size() - 1 << ", "
            << passages.back().nodes.size() - 1 << ")";
+    // 当上面除了首节点外，其余节点都能找到变道edge，则需在最后节点处新建RoadSegment
     AddRoadSegment(passages, start_index,
                    {passages.size() - 1, passages.back().nodes.size() - 1},
                    result);

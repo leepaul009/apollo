@@ -76,16 +76,19 @@ common::Status PiecewiseJerkPathOptimizer::Process(
   std::array<double, 5> w = {
       config.l_weight(),
       config.dl_weight() *
-          std::fmax(init_frenet_state.first[1] * init_frenet_state.first[1],
+          std::fmax(init_frenet_state.first[1] * init_frenet_state.first[1], // s[1]
                     5.0),
       config.ddl_weight(), config.dddl_weight(), 0.0};
 
+  // path_bounds_decider的输出
   const auto& path_boundaries =
       reference_line_info_->GetCandidatePathBoundaries();
   ADEBUG << "There are " << path_boundaries.size() << " path boundaries.";
+  // 得到last cycle的path data
   const auto& reference_path_data = reference_line_info_->path_data();
 
   std::vector<PathData> candidate_path_data;
+  // 单个ref_line_info可能有多个path_boundaries
   for (const auto& path_boundary : path_boundaries) {
     size_t path_boundary_size = path_boundary.boundary().size();
 
@@ -111,7 +114,7 @@ common::Status PiecewiseJerkPathOptimizer::Process(
     std::array<double, 3> end_state = {0.0, 0.0, 0.0};
 
     if (!FLAGS_enable_force_pull_over_open_space_parking_test) {
-      // pull over scenario
+      // pull over scenario 路边停车
       // set end lateral to be at the desired pull over destination
       const auto& pull_over_status =
           injector_->planning_context()->planning_status().pull_over();
@@ -130,6 +133,8 @@ common::Status PiecewiseJerkPathOptimizer::Process(
     PathData path_data = *final_path_data;
 
     // updated cost function for path reference
+    // bound点可以当做轨迹点，
+    // path_reference_l是reference_path_data(prev path)基于ref_line的横向坐标
     std::vector<double> path_reference_l(path_boundary_size, 0.0);
     bool is_valid_path_reference = false;
     size_t path_reference_size = reference_path_data.path_reference().size();

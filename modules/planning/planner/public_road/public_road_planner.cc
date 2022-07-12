@@ -35,6 +35,7 @@ Status PublicRoadPlanner::Plan(const TrajectoryPoint& planning_start_point,
                                ADCTrajectory* ptr_computed_trajectory) {
   scenario_manager_.Update(planning_start_point, *frame);
   scenario_ = scenario_manager_.mutable_scenario();
+  // Process（在scenario_的基类中实现）会调用stage的Process
   auto result = scenario_->Process(planning_start_point, frame);
 
   if (FLAGS_enable_record_debug) {

@@ -110,12 +110,16 @@ bool DpStCost::InKeepClearRange(double s) const {
   return false;
 }
 
+// 根据当前st_graph_point表示的的ego决策，利用纵向overlap来计算cost
 double DpStCost::GetObstacleCost(const StGraphPoint& st_graph_point) {
   const double s = st_graph_point.point().s();
   const double t = st_graph_point.point().t();
 
   double cost = 0.0;
 
+  // st_drivable_boundary是st_bounds_decider计算得到的，但是默认不适用这个
+  // 因为st_bounds_decider已经为每个时刻计算了 较小范围的 规划空间，
+  // 所以用st_drivable_boundary 似乎就不需要再做动态规划 来计算初值（用来提供给优化步骤）
   if (FLAGS_use_st_drivable_boundary) {
     // TODO(Jiancheng): move to configs
     static constexpr double boundary_resolution = 0.1;
@@ -140,45 +144,52 @@ double DpStCost::GetObstacleCost(const StGraphPoint& st_graph_point) {
     // Stop obstacles are assumed to have a safety margin when mapping them out,
     // so repelling force in dp st is not needed as it is designed to have adc
     // stop right at the stop distance we design in prior mapping process
+    // 猜测是这种障碍物信息 已经被处理为“stop wall”类型的障碍物，所以不需要在此处处理
     if (obstacle->LongitudinalDecision().has_stop()) {
       continue;
     }
 
     auto boundary = obstacle->path_st_boundary();
 
-    if (boundary.min_s() > FLAGS_speed_lon_decision_horizon) {
+    if (boundary.min_s() > FLAGS_speed_lon_decision_horizon) { // 200m
       continue;
     }
     if (t < boundary.min_t() || t > boundary.max_t()) {
       continue;
     }
+    // 规划点落在此障碍物区间表示cost无穷大
     if (boundary.IsPointInBoundary(st_graph_point.point())) {
       return kInf;
     }
     double s_upper = 0.0;
     double s_lower = 0.0;
 
+    // 填充boundary_cost_，如果此障碍物、此时刻的cost有值，则取出赋给s的上下界
     int boundary_index = boundary_map_[boundary.id()];
     if (boundary_cost_[boundary_index][st_graph_point.index_t()].first < 0.0) {
-      boundary.GetBoundarySRange(t, &s_upper, &s_lower);
+      boundary.GetBoundarySRange(t, &s_upper, &s_lower); // 插值
       boundary_cost_[boundary_index][st_graph_point.index_t()] =
           std::make_pair(s_upper, s_lower);
     } else {
       s_upper = boundary_cost_[boundary_index][st_graph_point.index_t()].first;
       s_lower = boundary_cost_[boundary_index][st_graph_point.index_t()].second;
     }
+    // config是DpStSpeedOptimizerConfig
     if (s < s_lower) {
-      const double follow_distance_s = config_.safe_distance();
+      // 此st_graph_point的动作为“跟车”
+      const double follow_distance_s = config_.safe_distance(); // 20m
       if (s + follow_distance_s < s_lower) {
         continue;
       } else {
-        auto s_diff = follow_distance_s - s_lower + s;
+        // 障碍物下界在“安全跟车距离”以内
+        auto s_diff = follow_distance_s - s_lower + s; // 重合的纵向位移
         cost += config_.obstacle_weight() * config_.default_obstacle_cost() *
                 s_diff * s_diff;
       }
     } else if (s > s_upper) {
+      // 此st_graph_point的动作为“超车”
       const double overtake_distance_s =
-          StGapEstimator::EstimateSafeOvertakingGap();
+          StGapEstimator::EstimateSafeOvertakingGap(); // 20m，参数决定
       if (s > s_upper + overtake_distance_s) {  // or calculated from velocity
         continue;
       } else {

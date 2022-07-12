@@ -67,6 +67,7 @@ Status SpeedBoundsDecider::Process(
     path_decision->EraseStBoundaries();
   }
 
+  // 为 path_decision的障碍物创建 path_st_boundary
   if (boundary_mapper.ComputeSTBoundary(path_decision).code() ==
       ErrorCode::PLANNING_ERROR) {
     const std::string msg = "Mapping obstacle failed.";
@@ -78,6 +79,7 @@ Status SpeedBoundsDecider::Process(
   ADEBUG << "Time for ST Boundary Mapping = " << diff.count() * 1000
          << " msec.";
 
+  // 调整path_decision的障碍物的block类型 将他们的 path_st_bound 放入boundaries，
   std::vector<const STBoundary *> boundaries;
   for (auto *obstacle : path_decision->obstacles().Items()) {
     const auto &id = obstacle->Id();
@@ -92,6 +94,7 @@ Status SpeedBoundsDecider::Process(
     }
   }
 
+  // 如果存在对向车道上的obstacle(也在ego轨迹上)，并且它离ego最近，则min_s_on_st_boundaries=0
   const double min_s_on_st_boundaries = SetSpeedFallbackDistance(path_decision);
 
   // 2. Create speed limit along path
@@ -121,6 +124,7 @@ Status SpeedBoundsDecider::Process(
   auto *debug = reference_line_info_->mutable_debug();
   STGraphDebug *st_graph_debug = debug->mutable_planning_data()->add_st_graph();
 
+  // 将boundaries放入st_graph_data
   st_graph_data->LoadData(boundaries, min_s_on_st_boundaries, init_point,
                           speed_limit, reference_line_info->GetCruiseSpeed(),
                           path_data_length, total_time_by_conf, st_graph_debug);
@@ -150,6 +154,7 @@ double SpeedBoundsDecider::SetSpeedFallbackDistance(
     const auto lowest_s = std::min(left_bottom_point_s, right_bottom_point_s);
 
     if (left_bottom_point_s - right_bottom_point_s > kEpsilon) {
+      // 这种情况表示obstacle在对向车道
       if (min_s_reverse > lowest_s) {
         min_s_reverse = lowest_s;
       }

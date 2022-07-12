@@ -34,6 +34,8 @@ std::string Routing::Name() const { return FLAGS_routing_node_name; }
 Routing::Routing()
     : monitor_logger_buffer_(common::monitor::MonitorMessageItem::ROUTING) {}
 
+// 初始化navigator
+// Get default base map from the file specified by global flags, return nullptr if failed to load
 apollo::common::Status Routing::Init() {
   const auto routing_map_file = apollo::hdmap::RoutingMapFile();
   AINFO << "Use routing topology graph path: " << routing_map_file;
@@ -45,6 +47,7 @@ apollo::common::Status Routing::Init() {
   return apollo::common::Status::OK();
 }
 
+// 确认下navigator是否准备好
 apollo::common::Status Routing::Start() {
   if (!navigator_ptr_->IsReady()) {
     AERROR << "Navigator is not ready!";
@@ -74,6 +77,7 @@ std::vector<RoutingRequest> Routing::FillLaneInfoIfMissing(
     std::vector<std::shared_ptr<const hdmap::LaneInfo>> lanes;
     // look for lanes with bigger radius if not found
     constexpr double kRadius = 0.3;
+    // i和上层冲突
     for (int i = 0; i < 20; ++i) {
       hdmap_->GetLanes(point, kRadius + i * kRadius, &lanes);
       if (lanes.size() > 0) {
@@ -105,12 +109,16 @@ std::vector<RoutingRequest> Routing::FillLaneInfoIfMissing(
   // first routing_request
   fixed_requests.push_back(fixed_request);
 
+  // 输入的routing_request的waypoint，如果被映射到第二条或者以上的lane，
+  // 则对于这些lane，我们也需要创建新的RoutingRequest，使request包含这些车道点
+  // 这样，就出现了多个RoutingRequest
   // additional routing_requests because of lane overlaps
   for (const auto& m : additional_lane_waypoint_map) {
     size_t cur_size = fixed_requests.size();
     for (size_t i = 0; i < cur_size; ++i) {
       // use index to iterate while keeping push_back
-      for (const auto& lane_waypoint : m.second) {
+      for (const auto& lane_waypoint : m.second) 
+      {
         RoutingRequest new_request(fixed_requests[i]);
         auto waypoint_info = new_request.mutable_waypoint(m.first);
         waypoint_info->set_id(lane_waypoint.id());
@@ -171,14 +179,20 @@ bool Routing::Process(const std::shared_ptr<RoutingRequest>& routing_request,
   CHECK_NOTNULL(routing_response);
   AINFO << "Get new routing request:" << routing_request->DebugString();
 
+  // request的扩充只发生在: 某个request.waypoint存在于多条lane上（多条lane有overlap）
+  // 否则，request只会有一个
   const auto& fixed_requests = FillLaneInfoIfMissing(*routing_request);
   double min_routing_length = std::numeric_limits<double>::max();
-  for (const auto& fixed_request : fixed_requests) {
+  for (const auto& fixed_request : fixed_requests) 
+  {
     RoutingResponse routing_response_temp;
-    if (navigator_ptr_->SearchRoute(fixed_request, &routing_response_temp)) {
+    if (navigator_ptr_->SearchRoute(fixed_request, &routing_response_temp)) 
+    {
       const double routing_length =
           routing_response_temp.measurement().distance();
-      if (routing_length < min_routing_length) {
+      // 选择最短的routing
+      if (routing_length < min_routing_length) 
+      {
         routing_response->CopyFrom(routing_response_temp);
         min_routing_length = routing_length;
       }

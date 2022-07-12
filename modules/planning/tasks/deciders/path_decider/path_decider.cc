@@ -46,6 +46,7 @@ Status PathDecider::Execute(Frame *frame,
                  reference_line_info->path_decision());
 }
 
+// 更新PathDecision
 Status PathDecider::Process(const ReferenceLineInfo *reference_line_info,
                             const PathData &path_data,
                             PathDecision *const path_decision) {
@@ -81,7 +82,8 @@ bool PathDecider::MakeObjectDecision(const PathData &path_data,
 // Before it gets retired, its logics are slightly modified so that everything
 // still works well for now.
 bool PathDecider::MakeStaticObstacleDecision(
-    const PathData &path_data, const std::string &blocking_obstacle_id,
+    const PathData &path_data, 
+    const std::string &blocking_obstacle_id,
     PathDecision *const path_decision) {
   // Sanity checks and get important values.
   ACHECK(path_decision);
@@ -106,6 +108,7 @@ bool PathDecider::MakeStaticObstacleDecision(
       continue;
     }
     // - skip decision making for obstacles with IGNORE/STOP decisions already.
+    // 忽略这两种情况，是应为在其他地方处理过么？
     if (obstacle->HasLongitudinalDecision() &&
         obstacle->LongitudinalDecision().has_ignore() &&
         obstacle->HasLateralDecision() &&
@@ -125,6 +128,7 @@ bool PathDecider::MakeStaticObstacleDecision(
              .is_in_path_lane_borrow_scenario()) {
       // Add stop decision
       ADEBUG << "Blocking obstacle = " << blocking_obstacle_id;
+      // 生成一个object_decision，加入到path_decision内
       ObjectDecisionType object_decision;
       *object_decision.mutable_stop() = GenerateObjectStopDecision(*obstacle);
       path_decision->AddLongitudinalDecision("PathDecider/blocking_obstacle",
@@ -132,6 +136,7 @@ bool PathDecider::MakeStaticObstacleDecision(
       continue;
     }
     // - skip decision making for clear-zone obstacles.
+    // 是否因为ego不会进入clear zone？
     if (obstacle->reference_line_st_boundary().boundary_type() ==
         STBoundary::BoundaryType::KEEP_CLEAR) {
       continue;
@@ -141,6 +146,7 @@ bool PathDecider::MakeStaticObstacleDecision(
     ObjectDecisionType object_decision;
     object_decision.mutable_ignore();
     const auto &sl_boundary = obstacle->PerceptionSLBoundary();
+    // 在轨迹longitudinal方向范围外的障碍物，为此障碍物生成ignore desicion
     if (sl_boundary.end_s() < frenet_path.front().s() ||
         sl_boundary.start_s() > frenet_path.back().s()) {
       path_decision->AddLongitudinalDecision("PathDecider/not-in-s",
@@ -150,19 +156,23 @@ bool PathDecider::MakeStaticObstacleDecision(
       continue;
     }
 
+    // 找到距离“障碍物sl_boundary”最近的轨迹点
     const auto frenet_point = frenet_path.GetNearestPoint(sl_boundary);
     const double curr_l = frenet_point.l();
     double min_nudge_l =
         half_width +
         config_.path_decider_config().static_obstacle_buffer() / 2.0;
 
+    // ego右界 > obs左界 或者 ego左界 < obs右界，则为此障碍物生成ignore desicion
     if (curr_l - lateral_radius > sl_boundary.end_l() ||
         curr_l + lateral_radius < sl_boundary.start_l()) {
       // 1. IGNORE if laterally too far away.
       path_decision->AddLateralDecision("PathDecider/not-in-l", obstacle->Id(),
                                         object_decision);
-    } else if (sl_boundary.end_l() >= curr_l - min_nudge_l &&
-               sl_boundary.start_l() <= curr_l + min_nudge_l) {
+    }
+    // ego左界 >= obs右界 并且 ego右界 <= obs左界，有overlap，生成stop desicion
+    else if (sl_boundary.end_l() >= curr_l - min_nudge_l &&
+               sl_boundary.start_l() <= curr_l + min_nudge_l) { 
       // 2. STOP if laterally too overlapping.
       *object_decision.mutable_stop() = GenerateObjectStopDecision(*obstacle);
 
@@ -178,10 +188,13 @@ bool PathDecider::MakeStaticObstacleDecision(
         path_decision->AddLongitudinalDecision("PathDecider/not-nearest-stop",
                                                obstacle->Id(), object_decision);
       }
-    } else {
+    } 
+    // NUDGE左右绕行desicion
+    else {
       // 3. NUDGE if laterally very close.
       if (sl_boundary.end_l() < curr_l - min_nudge_l) {  // &&
         // sl_boundary.end_l() > curr_l - min_nudge_l - 0.3) {
+        // ego右界 > obs左界，left nudge
         // LEFT_NUDGE
         ObjectNudge *object_nudge_ptr = object_decision.mutable_nudge();
         object_nudge_ptr->set_type(ObjectNudge::LEFT_NUDGE);

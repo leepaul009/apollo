@@ -75,6 +75,9 @@ struct LaneSegment {
   LaneSegment() = default;
   LaneSegment(LaneInfoConstPtr lane, const double start_s, const double end_s)
       : lane(CHECK_NOTNULL(lane)), start_s(start_s), end_s(end_s) {}
+  // LaneInfo在hdmap_common中定义
+  // Note：在用HDMap初始化阶段，其segment可以是argo的lane node（2点组成一个segment）
+  // 处理的后期，其segment也可以是layered map lane segment
   LaneInfoConstPtr lane = nullptr;
   double start_s = 0.0;
   double end_s = 0.0;

@@ -172,6 +172,7 @@ Status OnLanePlanning::InitFrame(const uint32_t sequence_num,
     }
   }
 
+  // Init过程中，最重要的应该就是ref_line_info的生成了
   auto status = frame_->Init(
       injector_->vehicle_state(), reference_lines, segments,
       reference_line_provider_->FutureRouteWaypoints(), injector_->ego_info());
@@ -324,6 +325,7 @@ void OnLanePlanning::RunOnce(const LocalView& local_view,
     ADEBUG << "last_routing_:" << last_routing_.ShortDebugString();
     injector_->history()->Clear();
     injector_->planning_context()->mutable_planning_status()->Clear();
+    // 更新routing
     reference_line_provider_->UpdateRoutingResponse(*local_view_.routing);
     planner_->Init(config_);
   }
@@ -360,6 +362,8 @@ void OnLanePlanning::RunOnce(const LocalView& local_view,
           last_publishable_trajectory_.get(), &replan_reason);
 
   injector_->ego_info()->Update(stitching_trajectory.back(), vehicle_state);
+
+  // 初始化frame
   const uint32_t frame_num = static_cast<uint32_t>(seq_num_++);
   status = InitFrame(frame_num, stitching_trajectory.back(), vehicle_state);
 
@@ -406,6 +410,7 @@ void OnLanePlanning::RunOnce(const LocalView& local_view,
   for (auto& ref_line_info : *frame_->mutable_reference_line_info()) {
     TrafficDecider traffic_decider;
     traffic_decider.Init(traffic_rule_configs_);
+    // traffic decider的结果会放在ref_line_info.path_decision里
     auto traffic_status =
         traffic_decider.Execute(frame_.get(), &ref_line_info, injector_);
     if (!traffic_status.ok() || !ref_line_info.IsDrivable()) {
@@ -414,7 +419,9 @@ void OnLanePlanning::RunOnce(const LocalView& local_view,
             << " traffic decider failed";
     }
   }
+
   status = Plan(start_timestamp, stitching_trajectory, ptr_trajectory_pb);
+  
   for (const auto& p : ptr_trajectory_pb->trajectory_point()) {
     ADEBUG << p.DebugString();
   }

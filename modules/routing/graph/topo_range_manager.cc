@@ -25,6 +25,7 @@ namespace apollo {
 namespace routing {
 namespace {
 
+// 因为一个node可能有多个range
 void merge_block_range(const TopoNode* topo_node,
                        const std::vector<NodeSRange>& origin_range,
                        std::vector<NodeSRange>* block_range) {
@@ -34,11 +35,13 @@ void merge_block_range(const TopoNode* topo_node,
   auto total_size = sorted_origin_range.size();
   while (cur_index < total_size) {
     NodeSRange range(sorted_origin_range[cur_index]);
+    // 后面的一些range，如果和当前的重合，则合并入当前
     ++cur_index;
     while (cur_index < total_size &&
            range.MergeRangeOverlap(sorted_origin_range[cur_index])) {
       ++cur_index;
     }
+    // range和topo_node的范围不重合，则忽略此range
     if (range.EndS() < topo_node->StartS() ||
         range.StartS() > topo_node->EndS()) {
       continue;

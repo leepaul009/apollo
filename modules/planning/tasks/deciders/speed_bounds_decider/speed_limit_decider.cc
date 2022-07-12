@@ -78,7 +78,7 @@ Status SpeedLimitDecider::GetSpeedLimits(
     double speed_limit_from_nearby_obstacles =
         std::numeric_limits<double>::max();
     const double collision_safety_range =
-        speed_bounds_config_.collision_safety_range();
+        speed_bounds_config_.collision_safety_range(); // def 1.0
     for (const auto* ptr_obstacle : obstacles.Items()) {
       if (ptr_obstacle->IsVirtual()) {
         continue;
@@ -134,10 +134,10 @@ Status SpeedLimitDecider::GetSpeedLimits(
         double nudge_speed_ratio = 1.0;
         if (ptr_obstacle->IsStatic()) {
           nudge_speed_ratio =
-              speed_bounds_config_.static_obs_nudge_speed_ratio();
+              speed_bounds_config_.static_obs_nudge_speed_ratio(); // 0.6
         } else {
           nudge_speed_ratio =
-              speed_bounds_config_.dynamic_obs_nudge_speed_ratio();
+              speed_bounds_config_.dynamic_obs_nudge_speed_ratio(); // 0.8
         }
         speed_limit_from_nearby_obstacles =
             nudge_speed_ratio * speed_limit_from_reference_line;

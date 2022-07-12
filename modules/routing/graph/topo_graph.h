@@ -52,9 +52,11 @@ class TopoGraph {
   std::string map_district_;
   std::vector<std::shared_ptr<TopoNode> > topo_nodes_;
   std::vector<std::shared_ptr<TopoEdge> > topo_edges_;
+  // lane_id => topo_node(local id)
+  // a lane corresponding to unique topo node
   std::unordered_map<std::string, int> node_index_map_;
   std::unordered_map<std::string, std::unordered_set<const TopoNode*> >
-      road_node_map_;
+      road_node_map_; // road_id ==> set of topo_node
 };
 
 }  // namespace routing

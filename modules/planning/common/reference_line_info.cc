@@ -152,9 +152,11 @@ hdmap::LaneInfoConstPtr ReferenceLineInfo::LocateLaneInfo(
 }
 
 bool ReferenceLineInfo::GetNeighborLaneInfo(
-    const ReferenceLineInfo::LaneType lane_type, const double s,
-    hdmap::Id* ptr_lane_id, double* ptr_lane_width) const {
-  auto ptr_lane_info = LocateLaneInfo(s);
+    const ReferenceLineInfo::LaneType lane_type, 
+    const double s,
+    hdmap::Id* ptr_lane_id, 
+    double* ptr_lane_width) const {
+  auto ptr_lane_info = LocateLaneInfo(s); // hdmap::LaneInfoConstPtr
   if (ptr_lane_info == nullptr) {
     return false;
   }
@@ -192,7 +194,7 @@ bool ReferenceLineInfo::GetNeighborLaneInfo(
       ACHECK(false);
   }
   auto ptr_neighbor_lane =
-      hdmap::HDMapUtil::BaseMapPtr()->GetLaneById(*ptr_lane_id);
+      hdmap::HDMapUtil::BaseMapPtr()->GetLaneById(*ptr_lane_id); // LaneInfoConstPtr
   if (ptr_neighbor_lane == nullptr) {
     return false;
   }
@@ -365,6 +367,7 @@ Obstacle* ReferenceLineInfo::AddObstacle(const Obstacle* obstacle) {
   }
 
   SLBoundary perception_sl;
+  // SLBoundary is boundary of obstacle bbox refer to reference_line_
   if (!reference_line_.GetSLBoundary(obstacle->PerceptionBoundingBox(),
                                      &perception_sl)) {
     AERROR << "Failed to get sl boundary for obstacle: " << obstacle->Id();
@@ -628,6 +631,7 @@ void ReferenceLineInfo::SetDrivable(bool drivable) { is_drivable_ = drivable; }
 
 bool ReferenceLineInfo::IsDrivable() const { return is_drivable_; }
 
+// Indicates whether the vehicle（ADC） is on current RouteSegment.
 bool ReferenceLineInfo::IsChangeLanePath() const {
   return !Lanes().IsOnSegment();
 }

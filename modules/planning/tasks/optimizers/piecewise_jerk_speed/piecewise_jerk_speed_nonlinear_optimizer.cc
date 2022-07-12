@@ -427,6 +427,7 @@ Status PiecewiseJerkSpeedNonlinearOptimizer::SmoothPathCurvature(
   return Status::OK();
 }
 
+// speed_data是动态规划过程中计算的“初值”
 Status PiecewiseJerkSpeedNonlinearOptimizer::OptimizeByQP(
     SpeedData* const speed_data, std::vector<double>* distance,
     std::vector<double>* velocity, std::vector<double>* acceleration) {

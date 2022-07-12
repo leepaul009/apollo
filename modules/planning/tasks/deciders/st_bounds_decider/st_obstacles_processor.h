@@ -202,6 +202,9 @@ class STObstaclesProcessor {
 
   // A vector of sorted obstacle's t-edges:
   //  (is_starting_t, t, s_min, s_max, obs_id).
+  // obs_t_edges_每两个构成一个ST图上的unique障碍区域
+  // 前一个表示左下、左上点 首个int=1，后一个表示右下、右上点
+  // 排序：时间不等按时间asc排，时间相等的，区域开始的item排前
   std::vector<std::tuple<int, double, double, double, std::string>>
       obs_t_edges_;
   int obs_t_edges_idx_;
@@ -215,6 +218,7 @@ class STObstaclesProcessor {
   std::unordered_map<std::string, STBoundary>
       obs_id_to_alternative_st_boundary_;
 
+  // 低优先级的片段，每个片段记录起止位置s值
   std::vector<std::pair<double, double>> adc_low_road_right_segments_;
 
   History* history_ = nullptr;

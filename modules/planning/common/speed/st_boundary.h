@@ -166,7 +166,7 @@ class STBoundary : public common::math::Polygon2d {
   std::vector<STPoint> upper_points_;
   std::vector<STPoint> lower_points_;
 
-  std::string id_;
+  std::string id_; // 障碍物id
   double characteristic_length_ = 1.0;
   double min_s_ = std::numeric_limits<double>::max();
   double max_s_ = std::numeric_limits<double>::lowest();

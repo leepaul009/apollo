@@ -117,13 +117,18 @@ void RuleBasedStopDecider::CheckLaneChangeUrgency(Frame *const frame) {
 
 void RuleBasedStopDecider::AddPathEndStop(
     Frame *const frame, ReferenceLineInfo *const reference_line_info) {
+  // 轨迹长度小于20m，则
   if (!reference_line_info->path_data().path_label().empty() &&
       reference_line_info->path_data().frenet_frame_path().back().s() -
               reference_line_info->path_data().frenet_frame_path().front().s() <
-          FLAGS_short_path_length_threshold) {
+          FLAGS_short_path_length_threshold) 
+  {
     const std::string stop_wall_id =
         PATH_END_VO_ID_PREFIX + reference_line_info->path_data().path_label();
     std::vector<std::string> wait_for_obstacles;
+    // 添加new decision到ref_line_info.path_decision_.obstacles_[this]
+    // 细节：创建stop wall
+    // frame仅仅用于调用API创建CreateStopObstacle，创建stop wall
     util::BuildStopDecision(
         stop_wall_id,
         reference_line_info->path_data().frenet_frame_path().back().s() - 5.0,
@@ -150,22 +155,26 @@ void RuleBasedStopDecider::StopOnSidePass(
       CheckClearDone(*reference_line_info, change_lane_stop_path_point)) {
     check_clear = false;
   }
-
+  // check_clear=false 并且 存在借道“对向车道”
   if (!check_clear &&
-      CheckSidePassStop(path_data, *reference_line_info, &stop_s_on_pathdata)) {
+      CheckSidePassStop(path_data, *reference_line_info, &stop_s_on_pathdata)) 
+  {
     if (!LaneChangeDecider::IsPerceptionBlocked(
             *reference_line_info,
             rule_based_stop_decider_config_.search_beam_length(),
             rule_based_stop_decider_config_.search_beam_radius_intensity(),
             rule_based_stop_decider_config_.search_range(),
             rule_based_stop_decider_config_.is_block_angle_threshold()) &&
-        LaneChangeDecider::IsClearToChangeLane(reference_line_info)) {
+        LaneChangeDecider::IsClearToChangeLane(reference_line_info)) 
+    {
       return;
     }
-    if (!CheckADCStop(path_data, *reference_line_info, stop_s_on_pathdata)) {
+    if (!CheckADCStop(path_data, *reference_line_info, stop_s_on_pathdata)) 
+    {
       if (!BuildSidePassStopFence(path_data, stop_s_on_pathdata,
                                   &change_lane_stop_path_point, frame,
-                                  reference_line_info)) {
+                                  reference_line_info)) 
+      {
         AERROR << "Set side pass stop fail";
       }
     } else {
@@ -187,7 +196,8 @@ bool RuleBasedStopDecider::CheckSidePassStop(
   for (const auto &point_guide : path_point_decision_guide) {
     if (last_path_point_type == PathData::PathPointType::IN_LANE &&
         std::get<1>(point_guide) ==
-            PathData::PathPointType::OUT_ON_REVERSE_LANE) {
+            PathData::PathPointType::OUT_ON_REVERSE_LANE) 
+    {
       *stop_s_on_pathdata = std::get<0>(point_guide);
       // Approximate the stop fence s based on the vehicle position
       const auto &vehicle_config =

@@ -39,6 +39,7 @@ using apollo::routing::RoutingResponse;
 using apollo::storytelling::Stories;
 
 bool PlanningComponent::Init() {
+  // 创建injector_
   injector_ = std::make_shared<DependencyInjector>();
 
   if (FLAGS_use_navigation_mode) {
@@ -130,6 +131,7 @@ bool PlanningComponent::Proc(
   local_view_.prediction_obstacles = prediction_obstacles;
   local_view_.chassis = chassis;
   local_view_.localization_estimate = localization_estimate;
+  // 读取routing到local_view
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!local_view_.routing ||
@@ -158,6 +160,7 @@ bool PlanningComponent::Proc(
     return false;
   }
 
+  // 如果是学习模式
   if (config_.learning_mode() != PlanningConfig::NO_LEARNING) {
     // data process for online training
     message_process_.OnChassis(*local_view_.chassis);
@@ -185,6 +188,7 @@ bool PlanningComponent::Proc(
     return true;
   }
 
+  // 计算轨迹
   ADCTrajectory adc_trajectory_pb;
   planning_base_->RunOnce(local_view_, &adc_trajectory_pb);
   common::util::FillHeader(node_->Name(), &adc_trajectory_pb);
@@ -205,6 +209,8 @@ bool PlanningComponent::Proc(
 }
 
 void PlanningComponent::CheckRerouting() {
+  // planning_context定义在common里
+  // planning_status定义在proto/planning_proto里
   auto* rerouting = injector_->planning_context()
                         ->mutable_planning_status()
                         ->mutable_rerouting();

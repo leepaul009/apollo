@@ -42,15 +42,19 @@ void ConvertOutRange(const RepeatedPtrField<CurveRange>& range_vec,
   for (const auto& c_range : range_vec) {
     double s_s = c_range.start().s();
     double e_s = c_range.end().s();
+    // 如果输入的range非法、或者在node的范围之外，略过
     if (e_s < start_s || s_s > end_s || e_s < s_s) {
       continue;
     }
+    // 用node的范围定义range（range需在node范围内）
     s_s = std::max(start_s, s_s);
     e_s = std::min(end_s, e_s);
     NodeSRange s_range(s_s, e_s);
     out_range->push_back(std::move(s_range));
   }
+  // 按照range.start给range排序
   sort(out_range->begin(), out_range->end());
+  // 选择最长的range作为“prefer_range”
   int max_index = -1;
   double max_diff = 0.0;
   for (size_t i = 0; i < out_range->size(); ++i) {
@@ -116,6 +120,8 @@ void TopoNode::Init() {
   if (!FindAnchorPoint()) {
     AWARN << "Be attention!!! Find anchor point failed for lane: " << LaneId();
   }
+  // 生成range_vector和pprefer_range_index
+  // 如果pb_node_.left_out()为空，则range_vector为空，prefer_range_index=-1
   ConvertOutRange(pb_node_.left_out(), start_s_, end_s_,
                   &left_out_sorted_range_, &left_prefer_range_index_);
 

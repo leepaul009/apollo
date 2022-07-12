@@ -49,6 +49,7 @@ double MoveSBackward(double s, double lower_bound) {
 
 void GetOutParallelLane(const TopoNode* node,
                         std::unordered_set<const TopoNode*>* const node_set) {
+  // 出节点边，找到“后继节点”
   for (const auto* edge : node->OutToLeftOrRightEdge()) {
     const auto* to_node = edge->ToNode();
     if (node_set->count(to_node) == 0) {
@@ -118,7 +119,10 @@ void AddBlackMapFromInParallel(const TopoNode* node, double cut_ratio,
 
 void BlackListRangeGenerator::GenerateBlackMapFromRequest(
     const RoutingRequest& request, const TopoGraph* graph,
-    TopoRangeManager* const range_manager) const {
+    TopoRangeManager* const range_manager) const 
+{
+  // add blacklisted lane and road into range_manager
+  // range_manager维护了从node到ranges的映射
   AddBlackMapFromLane(request, graph, range_manager);
   AddBlackMapFromRoad(request, graph, range_manager);
   range_manager->SortAndMerge();
@@ -149,11 +153,13 @@ void BlackListRangeGenerator::AddBlackMapFromTerminal(
 
   double start_cut_s = MoveSBackward(start_s_adjusted, 0.0);
   range_manager->Add(src_node, start_cut_s, start_cut_s);
+  // 找到src_node节点的 直接、间接“left/right”关系的后继节点
   AddBlackMapFromOutParallel(src_node, start_cut_s / start_length,
                              range_manager);
 
   double end_cut_s = MoveSForward(end_s_adjusted, end_length);
   range_manager->Add(dest_node, end_cut_s, end_cut_s);
+  // 找到dest_node节点的 直接、间接“left/right”关系的前驱节点
   AddBlackMapFromInParallel(dest_node, end_cut_s / end_length, range_manager);
   range_manager->SortAndMerge();
 }

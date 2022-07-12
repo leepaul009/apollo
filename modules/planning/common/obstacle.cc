@@ -388,7 +388,7 @@ bool Obstacle::BuildTrajectoryStBoundary(const ReferenceLine& reference_line,
     common::math::Vec2d center((first_point.x() + second_point.x()) / 2.0,
                                (first_point.y() + second_point.y()) / 2.0);
     common::math::Box2d object_moving_box(
-        center, first_point.theta(), object_moving_box_length, object_width);
+        center, first_point.theta(), object_moving_box_length, object_width); // center,heading,L,W
     SLBoundary object_boundary;
     // NOTICE: this method will have errors when the reference line is not
     // straight. Need double loop to cover all corner cases.
@@ -408,6 +408,8 @@ bool Obstacle::BuildTrajectoryStBoundary(const ReferenceLine& reference_line,
                                   : std::fmin(reference_line.Length(),
                                               mid_s + 2.0 * distance_xy);
 
+    // (前后两帧的moving box) object_moving_box => object_boundary, 
+    // where object_boundary related to ref_line(is interval to s and l)
     if (!reference_line.GetApproximateSLBoundary(object_moving_box, start_s,
                                                  end_s, &object_boundary)) {
       AERROR << "failed to calculate boundary";
@@ -419,12 +421,13 @@ bool Obstacle::BuildTrajectoryStBoundary(const ReferenceLine& reference_line,
     last_index = i;
 
     // skip if object is entirely on one side of reference line.
+    // 计算一个w_threshold = obj_lon_s * 0.4 + adc_w * 0.5
     static constexpr double kSkipLDistanceFactor = 0.4;
     const double skip_l_distance =
         (object_boundary.end_s() - object_boundary.start_s()) *
             kSkipLDistanceFactor +
         adc_width / 2.0;
-
+    // skip if object_boundary ouside of interval(-w_threshold, w_threshold)
     if (!IsCautionLevelObstacle() &&
         (std::fmin(object_boundary.start_l(), object_boundary.end_l()) >
              skip_l_distance ||
@@ -437,13 +440,15 @@ bool Obstacle::BuildTrajectoryStBoundary(const ReferenceLine& reference_line,
       // skip if behind reference line
       continue;
     }
+    // 根据obj和ego的距离判断是否选定稀疏的ds？
     static constexpr double kSparseMappingS = 20.0;
     const double st_boundary_delta_s =
         (std::fabs(object_boundary.start_s() - adc_start_s) > kSparseMappingS)
-            ? kStBoundarySparseDeltaS
-            : kStBoundaryDeltaS;
+            ? kStBoundarySparseDeltaS // 1.0
+            : kStBoundaryDeltaS; // 0.2
     const double object_s_diff =
         object_boundary.end_s() - object_boundary.start_s();
+    // 只有当obj长度非法、或者heading非常大的时候
     if (object_s_diff < st_boundary_delta_s) {
       continue;
     }
@@ -470,6 +475,7 @@ bool Obstacle::BuildTrajectoryStBoundary(const ReferenceLine& reference_line,
         high_s -= st_boundary_delta_s;
       }
     }
+    // low_s和high_s类似于buffer
     if (has_low && has_high) {
       low_s -= st_boundary_delta_s;
       high_s += st_boundary_delta_s;
@@ -490,7 +496,7 @@ bool Obstacle::BuildTrajectoryStBoundary(const ReferenceLine& reference_line,
                            STPoint{high_s - adc_start_s, high_t}));
       }
     }
-  }
+  } // end for traj point
   if (!polygon_points.empty()) {
     std::sort(polygon_points.begin(), polygon_points.end(),
               [](const std::pair<STPoint, STPoint>& a,
@@ -505,6 +511,7 @@ bool Obstacle::BuildTrajectoryStBoundary(const ReferenceLine& reference_line,
                             });
     polygon_points.erase(last, polygon_points.end());
     if (polygon_points.size() > 2) {
+      // fill output st_boundary
       *st_boundary = STBoundary(polygon_points);
     }
   } else {

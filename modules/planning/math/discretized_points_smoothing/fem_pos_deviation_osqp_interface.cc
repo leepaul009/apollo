@@ -168,6 +168,7 @@ void FemPosDeviationOsqpInterface::CalculateKernel(
     ++col_num;
   }
 
+   // num_of_points_ is number of ref line point. last 5,6 variables
   int second_point_from_last_index = num_of_points_ - 2;
   for (int point_index = 2; point_index < second_point_from_last_index;
        ++point_index) {
@@ -239,8 +240,8 @@ void FemPosDeviationOsqpInterface::CalculateAffineConstraint(
   int ind_A = 0;
   for (int i = 0; i < num_of_variables_; ++i) {
     A_data->push_back(1.0);
-    A_indices->push_back(i);
-    A_indptr->push_back(ind_A);
+    A_indices->push_back(i); // row index
+    A_indptr->push_back(ind_A); // col index
     ++ind_A;
   }
   A_indptr->push_back(ind_A);

@@ -61,6 +61,8 @@ STBoundaryMapper::STBoundaryMapper(
       planning_max_time_(planning_time),
       injector_(injector) {}
 
+// 为 path_decision.obstacles 中每一个障碍物创建 path_st_boundary，
+// 为stop obs创建 path_st_boundary，为stop
 Status STBoundaryMapper::ComputeSTBoundary(PathDecision* path_decision) const {
   // Sanity checks.
   CHECK_GT(planning_max_time_, 0.0);
@@ -89,7 +91,7 @@ Status STBoundaryMapper::ComputeSTBoundary(PathDecision* path_decision) const {
     // If there is a longitudinal decision, then fine-tune boundary.
     const auto& decision = ptr_obstacle->LongitudinalDecision();
     if (decision.has_stop()) {
-      // 1. Store the closest stop fence info.
+      // 1. Store the closest stop fence info. 保存最近(s最小的)stop的obs,s和decision
       // TODO(all): store ref. s value in stop decision; refine the code then.
       common::SLPoint stop_sl_point;
       reference_line_.XYToSL(decision.stop().stop_point(), &stop_sl_point);
@@ -206,8 +208,8 @@ bool STBoundaryMapper::GetOverlapBoundaryPoints(
 
   double l_buffer =
       planning_status->status() == ChangeLaneStatus::IN_CHANGE_LANE
-          ? FLAGS_lane_change_obstacle_nudge_l_buffer
-          : FLAGS_nonstatic_obstacle_nudge_l_buffer;
+          ? FLAGS_lane_change_obstacle_nudge_l_buffer // 0.3
+          : FLAGS_nonstatic_obstacle_nudge_l_buffer;  // 0.4
 
   // Draw the given obstacle on the ST-graph.
   const auto& trajectory = obstacle.Trajectory();

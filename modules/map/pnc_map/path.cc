@@ -138,10 +138,12 @@ void LaneSegment::Join(std::vector<LaneSegment>* segments) {
   std::size_t i = 0;
   while (i < segments->size()) {
     std::size_t j = i;
+    // 找到属于同一lane(layered map的lane segment)的最后一个segment j
     while (j + 1 < segments->size() &&
            segments->at(i).lane == segments->at(j + 1).lane) {
       ++j;
     }
+    // segment_k(layered map的lane segment):
     auto& segment_k = segments->at(k);
     segment_k.lane = segments->at(i).lane;
     segment_k.start_s = segments->at(i).start_s;
@@ -152,6 +154,7 @@ void LaneSegment::Join(std::vector<LaneSegment>* segments) {
     if (segment_k.end_s + kSegmentDelta >= segment_k.lane->total_length()) {
       segment_k.end_s = segment_k.lane->total_length();
     }
+    // 处理下一个lane（LaneInfo）
     i = j + 1;
     ++k;
   }
@@ -401,6 +404,7 @@ void Path::InitLaneSegments() {
       }
     }
   }
+  // 将属于同一lane的segments(2-point seg)合并为一个segment(lane seg)
   LaneSegment::Join(&lane_segments_);
   if (lane_segments_.empty()) {
     return;
@@ -411,7 +415,7 @@ void Path::InitLaneSegments() {
     lane_accumulated_s_[i] =
         lane_accumulated_s_[i - 1] + lane_segments_[i].Length();
   }
-
+  // 2 point segment
   lane_segments_to_next_point_.clear();
   lane_segments_to_next_point_.reserve(num_points_);
   for (int i = 0; i + 1 < num_points_; ++i) {
@@ -514,6 +518,7 @@ void Path::GetAllOverlaps(GetOverlapFromLaneFunc GetOverlaps_from_lane,
       const auto& lane_overlap_info = overlap_info->lane_overlap_info();
       if (lane_overlap_info.start_s() <= lane_segment.end_s &&
           lane_overlap_info.end_s() >= lane_segment.start_s) {
+        // ref_s is offset of cur lane_segment
         const double ref_s = s - lane_segment.start_s;
         const double adjusted_start_s =
             std::max(lane_overlap_info.start_s(), lane_segment.start_s) + ref_s;
@@ -536,6 +541,7 @@ void Path::GetAllOverlaps(GetOverlapFromLaneFunc GetOverlaps_from_lane,
 
     const double kMinOverlapDistanceGap = 1.5;  // in meters.
     for (const auto& segment : segments) {
+      // merge given overlap with previous when distance less than 1.5m
       if (!overlaps->empty() && overlaps->back().object_id == object_id &&
           segment.first - overlaps->back().end_s <= kMinOverlapDistanceGap) {
         overlaps->back().end_s =

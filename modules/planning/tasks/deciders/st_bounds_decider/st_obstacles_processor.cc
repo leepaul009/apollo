@@ -95,20 +95,26 @@ Status STObstaclesProcessor::MapObstaclesToSTBoundaries(
   obs_id_to_st_boundary_.clear();
 
   // Some preprocessing to save the adc_low_road_right segments.
+  // 借助path point的decision type，统计“借对向、同向车道”的起止s值
+  // 借同向车道有一种情况应该是“变道”
   bool is_adc_low_road_right_beginning = true;
-  for (const auto& path_pt_info : path_data_.path_point_decision_guide()) {
+  for (const auto& path_pt_info : path_data_.path_point_decision_guide()) 
+  {
     double path_pt_s = 0.0;
     PathData::PathPointType path_pt_type;
     std::tie(path_pt_s, path_pt_type, std::ignore) = path_pt_info;
     if (path_pt_type == PathData::PathPointType::OUT_ON_FORWARD_LANE ||
-        path_pt_type == PathData::PathPointType::OUT_ON_REVERSE_LANE) {
+        path_pt_type == PathData::PathPointType::OUT_ON_REVERSE_LANE) 
+    {
+      // 统计“借道”的起止s值
       if (is_adc_low_road_right_beginning) {
         adc_low_road_right_segments_.emplace_back(path_pt_s, path_pt_s);
         is_adc_low_road_right_beginning = false;
       } else {
         adc_low_road_right_segments_.back().second = path_pt_s;
       }
-    } else if (path_pt_type == PathData::PathPointType::IN_LANE) {
+    } else if (path_pt_type == PathData::PathPointType::IN_LANE) 
+    {
       if (!is_adc_low_road_right_beginning) {
         is_adc_low_road_right_beginning = true;
       }
@@ -130,23 +136,29 @@ Status STObstaclesProcessor::MapObstaclesToSTBoundaries(
     }
 
     // Draw the obstacle's st-boundary.
-    std::vector<STPoint> lower_points;
+    std::vector<STPoint> lower_points; // st-boudary描述st图上的障碍物区域
     std::vector<STPoint> upper_points;
     bool is_caution_obstacle = false;
     double obs_caution_end_t = 0.0;
+    // 计算ST图中静态、动态障碍物的区域（用同时刻t下的上下边界点表示）
     if (!ComputeObstacleSTBoundary(*obs_ptr, &lower_points, &upper_points,
                                    &is_caution_obstacle, &obs_caution_end_t)) {
       // Obstacle doesn't appear on ST-Graph.
       continue;
     }
+    // 重新组织点的存储方式：|--lower_pt(time asc)--|--upper_pt(time desc)--|
     auto boundary =
         STBoundary::CreateInstanceAccurate(lower_points, upper_points);
     boundary.set_id(obs_ptr->Id());
     if (is_caution_obstacle) {
+      // 和ego轨迹在“借道”区域存在碰撞风险的“结束时间”
       boundary.set_obstacle_road_right_ending_t(obs_caution_end_t);
     }
+
     // Update the trimmed obstacle into alternative st-bound storage
     // for later uses.
+    // 如果obs_caution_end_t=0，处理后只剩下2个点，为什么？
+    // 只有在obs_caution_end_t非零时，alternative_st_boundary才有使用的价值？
     while (lower_points.size() > 2 &&
            lower_points.back().t() > obs_caution_end_t) {
       lower_points.pop_back();
@@ -175,13 +187,15 @@ Status STObstaclesProcessor::MapObstaclesToSTBoundaries(
       // Obstacle is static.
       if (std::get<0>(closest_stop_obstacle) == "NULL" ||
           std::get<1>(closest_stop_obstacle).bottom_left_point().s() >
-              boundary.bottom_left_point().s()) {
+              boundary.bottom_left_point().s()) 
+      {
+        // 记录一个s值最小的静态障碍物
         // If this static obstacle is closer for ADC to stop, record it.
         closest_stop_obstacle =
             std::make_tuple(obs_ptr->Id(), boundary, obs_ptr);
       }
     } else {
-      // Obstacle is dynamic.
+      // Obstacle is dynamic. threshold s=0.01 t=0.1
       if (boundary.bottom_left_point().s() - adc_path_init_s_ <
               kSIgnoreThreshold &&
           boundary.bottom_left_point().t() > kTIgnoreThreshold) {
@@ -194,7 +208,7 @@ Status STObstaclesProcessor::MapObstaclesToSTBoundaries(
       non_ignore_obstacles.insert(obs_ptr->Id());
       ADEBUG << "Adding " << obs_ptr->Id() << " into the ST-graph.";
     }
-  }
+  } // end for loop to obstacle
   // For static obstacles, only retain the closest one (also considers
   // Keep-Clear zone here).
   // Note: We only need to check the overlapping between the closest obstacle
@@ -212,10 +226,12 @@ Status STObstaclesProcessor::MapObstaclesToSTBoundaries(
     // Go through all Keep-Clear zones, and see if there is an even closer
     // stop fence due to them.
     if (!closest_stop_obs_ptr->IsVirtual()) {
-      for (const auto& clear_zone : candidate_clear_zones_) {
+      for (const auto& clear_zone : candidate_clear_zones_) 
+    {
         const auto& clear_zone_boundary = std::get<1>(clear_zone);
         if (closest_stop_obs_boundary.min_s() >= clear_zone_boundary.min_s() &&
-            closest_stop_obs_boundary.min_s() <= clear_zone_boundary.max_s()) {
+            closest_stop_obs_boundary.min_s() <= clear_zone_boundary.max_s()) 
+        {
           std::tie(closest_stop_obs_id, closest_stop_obs_boundary,
                    closest_stop_obs_ptr) = clear_zone;
           ADEBUG << "Clear zone " << closest_stop_obs_id << " is closer.";
@@ -231,6 +247,7 @@ Status STObstaclesProcessor::MapObstaclesToSTBoundaries(
   }
 
   // Set IGNORE decision for those that are not in ST-graph:
+  // 为non_ignore_obstacles以外的障碍物赋予“ignore decision”（到横纵向decision）
   for (const auto* obs_item_ptr : path_decision->obstacles().Items()) {
     Obstacle* obs_ptr = path_decision->Find(obs_item_ptr->Id());
     if (non_ignore_obstacles.count(obs_ptr->Id()) == 0) {
@@ -256,7 +273,7 @@ Status STObstaclesProcessor::MapObstaclesToSTBoundaries(
                               it.second.bottom_right_point().s(),
                               it.second.upper_right_point().s(), it.first);
   }
-  // Sort the edges.
+  // Sort the edges. 时间不等按时间asc排，时间相等的，区域开始的item排前
   std::sort(obs_t_edges_.begin(), obs_t_edges_.end(),
             [](const ObsTEdge& lhs, const ObsTEdge& rhs) {
               if (std::get<1>(lhs) != std::get<1>(rhs)) {
@@ -274,6 +291,8 @@ STObstaclesProcessor::GetAllSTBoundaries() {
   return obs_id_to_st_boundary_;
 }
 
+// 根据现存的障碍物决策 obs_id_to_decision_ 计算速度上下界
+// 注意：可能存在空的obs_decision，它不会更新 速度上下界
 bool STObstaclesProcessor::GetLimitingSpeedInfo(
     double t, std::pair<double, double>* const limiting_speed_info) {
   if (obs_id_to_decision_.empty()) {
@@ -289,16 +308,19 @@ bool STObstaclesProcessor::GetLimitingSpeedInfo(
     auto obs_st_boundary = obs_id_to_st_boundary_[obs_id];
     double obs_s_min = 0.0;
     double obs_s_max = 0.0;
+    // 有些的 障碍物决策 的创建不在t时刻， 需要插值计算其在t时刻的上下界
     obs_st_boundary.GetBoundarySRange(t, &obs_s_max, &obs_s_min);
     double obs_ds_lower = 0.0;
     double obs_ds_upper = 0.0;
     obs_st_boundary.GetBoundarySlopes(t, &obs_ds_upper, &obs_ds_lower);
     if (obs_decision.has_yield() || obs_decision.has_stop()) {
+      // 如果是 让路或停车 则取离ego最近的“同类型障碍物决策”的速度限制 obs_ds_lower
       if (obs_s_min <= s_max) {
         s_max = obs_s_min;
         limiting_speed_info->second = obs_ds_lower;
       }
     } else if (it.second.has_overtake()) {
+      // 如果是 超车 取最远的“同类型障碍物决策”的速度限制
       if (obs_s_max >= s_min) {
         s_min = obs_s_max;
         limiting_speed_info->first = obs_ds_upper;
@@ -308,19 +330,25 @@ bool STObstaclesProcessor::GetLimitingSpeedInfo(
   return s_min <= s_max;
 }
 
+// 构建当前时刻的 规划区间(available_s_bounds)和障碍物决策(available_obs_decisions)
+// obs_id_to_decision_(t=0时为空)是由"时刻t-1区间内的障碍物区域"(obs_edge)构建的
 bool STObstaclesProcessor::GetSBoundsFromDecisions(
-    double t, std::vector<std::pair<double, double>>* const available_s_bounds,
+    double t, 
+    std::vector<std::pair<double, double>>* const available_s_bounds,
     std::vector<std::vector<std::pair<std::string, ObjectDecisionType>>>* const
         available_obs_decisions) {
   // Sanity checks.
-  available_s_bounds->clear();
+  available_s_bounds->clear(); // empty s interval
   available_obs_decisions->clear();
 
   // Gather any possible change in st-boundary situations.
   ADEBUG << "There are " << obs_t_edges_.size() << " t-edges.";
   std::vector<ObsTEdge> new_t_edges;
+  // 得到 范围[t-1, t)内的末尾边obs_t_edge
+  // 得到 范围(t-1, t]内的开始边obs_t_edge
   while (obs_t_edges_idx_ < static_cast<int>(obs_t_edges_.size()) &&
-         std::get<1>(obs_t_edges_[obs_t_edges_idx_]) <= t) {
+         std::get<1>(obs_t_edges_[obs_t_edges_idx_]) <= t) 
+  {
     if (std::get<0>(obs_t_edges_[obs_t_edges_idx_]) == 0 &&
         std::get<1>(obs_t_edges_[obs_t_edges_idx_]) == t) {
       break;
@@ -332,6 +360,7 @@ bool STObstaclesProcessor::GetSBoundsFromDecisions(
   }
 
   // For st-boundaries that disappeared before t, remove them.
+  // 考虑到0.1s很短，如果一个障碍物的end点落在当前区间，可以忽略此障碍物对当前区间的影响
   for (const auto& obs_t_edge : new_t_edges) {
     if (std::get<0>(obs_t_edge) == 0) {
       ADEBUG << "Obstacle id: " << std::get<4>(obs_t_edge)
@@ -344,6 +373,7 @@ bool STObstaclesProcessor::GetSBoundsFromDecisions(
 
   // For overtaken obstacles, remove them if we are after
   // their high right-of-road ending time (with a margin).
+  // 从obs_id_to_decision_中 删除一些障碍物，这些障碍物的“ObsCautionEndTime”在时刻t之前
   std::vector<std::string> obs_id_to_remove;
   for (const auto& obs_id_to_decision_pair : obs_id_to_decision_) {
     auto obs_id = obs_id_to_decision_pair.first;
@@ -370,6 +400,8 @@ bool STObstaclesProcessor::GetSBoundsFromDecisions(
   }
 
   // Based on existing decisions, get the s-boundary.
+  // 用前一时刻选择的规划区间、及其障碍物决策 更新 s_min和s_max
+  // obs_id_to_decision_是前几个时刻计算得到的，用其更新 s_min和s_max
   double s_min = 0.0;
   double s_max = planning_distance_;
   for (auto it : obs_id_to_decision_) {
@@ -378,6 +410,7 @@ bool STObstaclesProcessor::GetSBoundsFromDecisions(
     auto obs_st_boundary = obs_id_to_st_boundary_[obs_id];
     double obs_s_min = 0.0;
     double obs_s_max = 0.0;
+    // 插值计算时刻t的上下界
     obs_st_boundary.GetBoundarySRange(t, &obs_s_max, &obs_s_min);
     if (obs_decision.has_yield() || obs_decision.has_stop()) {
       s_max = std::fmin(s_max, obs_s_min);
@@ -394,12 +427,16 @@ bool STObstaclesProcessor::GetSBoundsFromDecisions(
   // For newly entering st_boundaries, determine possible new-boundaries.
   // For apparent ones, make decisions directly.
   std::vector<ObsTEdge> ambiguous_t_edges;
-  for (auto obs_t_edge : new_t_edges) {
+  for (auto obs_t_edge : new_t_edges) 
+  {
     ADEBUG << "For obstacle id: " << std::get<4>(obs_t_edge)
            << ", its s-range = [" << std::get<2>(obs_t_edge) << ", "
            << std::get<3>(obs_t_edge) << "]";
-    if (std::get<0>(obs_t_edge) == 1) {
-      if (std::get<2>(obs_t_edge) >= s_max) {
+    if (std::get<0>(obs_t_edge) == 1) 
+    {
+      // ？？obs_id_to_decision_中不存在新建的new_t_edges
+      if (std::get<2>(obs_t_edge) >= s_max) 
+      {
         ADEBUG << "  Apparently, it should be yielded.";
         obs_id_to_decision_[std::get<4>(obs_t_edge)] =
             DetermineObstacleDecision(std::get<2>(obs_t_edge),
@@ -420,13 +457,19 @@ bool STObstaclesProcessor::GetSBoundsFromDecisions(
     }
   }
   // For ambiguous ones, enumerate all decisions and corresponding bounds.
+  // 当t=0时，s_gaps={0, planning_distance_}
+  // 当t!=0时，s_gaps记录了所有的empty interval(可以用于速度规划的区域)
+  // gap基本按照s值asc排序，默认地 s值小的gap被选取的可能性较大
   auto s_gaps = FindSGaps(ambiguous_t_edges, s_min, s_max);
   if (s_gaps.empty()) {
     return false;
   }
+  // available_s_bounds和available_obs_decisions中的相同位置的元素 为相关的一对儿
   for (auto s_gap : s_gaps) {
     available_s_bounds->push_back(s_gap);
     std::vector<std::pair<std::string, ObjectDecisionType>> obs_decisions;
+    // 对于每一个empty interval（ST图中没有obs的自由区域），
+    // 对所有在当前时刻区间内的obs_edge 构建障碍物决策 插入obs_decisions
     for (auto obs_t_edge : ambiguous_t_edges) {
       std::string obs_id = std::get<4>(obs_t_edge);
       double obs_s_min = std::get<2>(obs_t_edge);
@@ -436,22 +479,30 @@ bool STObstaclesProcessor::GetSBoundsFromDecisions(
           DetermineObstacleDecision(obs_s_min, obs_s_max,
                                     (s_gap.first + s_gap.second) / 2.0));
     }
+    // 当t=0时, 加入空obs_decisions
+    // 当前t-1~t区间的没有ambiguous_t_edges的时候，也加入空obs_decisions
     available_obs_decisions->push_back(obs_decisions);
   }
 
   return true;
 }
 
+// 更新 obs_id_to_decision_
+// 用障碍物决策类型更新 obs_id_to_st_boundary_
+// 更新 history_
 void STObstaclesProcessor::SetObstacleDecision(
     const std::string& obs_id, const ObjectDecisionType& obs_decision) {
   obs_id_to_decision_[obs_id] = obs_decision;
   ObjectStatus object_status;
   object_status.mutable_motion_type()->mutable_dynamic();
-  if (obs_decision.has_yield() || obs_decision.has_stop()) {
+  if (obs_decision.has_yield() || obs_decision.has_stop()) 
+  {
     obs_id_to_st_boundary_[obs_id].SetBoundaryType(
         STBoundary::BoundaryType::YIELD);
     object_status.mutable_decision_type()->mutable_yield();
-  } else if (obs_decision.has_overtake()) {
+  } 
+  else if (obs_decision.has_overtake()) 
+  {
     obs_id_to_st_boundary_[obs_id].SetBoundaryType(
         STBoundary::BoundaryType::OVERTAKE);
     object_status.mutable_decision_type()->mutable_overtake();
@@ -469,11 +520,15 @@ void STObstaclesProcessor::SetObstacleDecision(
 
 ///////////////////////////////////////////////////////////////////////////////
 // Private helper functions.
-
+// 记录 动态障碍物的 每个时刻的轨迹点(box) 和ego规划轨迹 的overlap(lower_points，upper_points)
 bool STObstaclesProcessor::ComputeObstacleSTBoundary(
-    const Obstacle& obstacle, std::vector<STPoint>* const lower_points,
-    std::vector<STPoint>* const upper_points, bool* const is_caution_obstacle,
-    double* const obs_caution_end_t) {
+    const Obstacle& obstacle, 
+    std::vector<STPoint>* const lower_points,
+    std::vector<STPoint>* const upper_points, 
+    bool* const is_caution_obstacle,
+    double* const obs_caution_end_t) 
+{
+  // 上下界点成对出现，共同组成st graph上的box
   lower_points->clear();
   upper_points->clear();
   *is_caution_obstacle = false;
@@ -513,14 +568,21 @@ bool STObstaclesProcessor::ComputeObstacleSTBoundary(
       const Box2d& obs_box = obstacle.GetBoundingBox(obs_traj_pt);
       ADEBUG << obs_box.DebugString();
       std::pair<double, double> overlapping_s;
+      // 如果ego的规划path 和 此时刻的obs_traj_pt有overlap的话
       if (GetOverlappingS(adc_path_points, obs_box, kADCSafetyLBuffer,
-                          &overlapping_s)) {
+                          &overlapping_s)) 
+      {
         ADEBUG << "Obstacle instance is overlapping with ADC path.";
+        // 记录 动态障碍物的 每个时刻的轨迹点(box) 和ego规划轨迹 的overlap interval
         lower_points->emplace_back(overlapping_s.first,
                                    obs_traj_pt.relative_time());
         upper_points->emplace_back(overlapping_s.second,
                                    obs_traj_pt.relative_time());
+        // 如果第一个traj pt和ego轨迹没有overlap，则不做判断
+        // 但是之后时刻的traj pt，可能会和ego轨迹存在overlap？
         if (is_obs_first_traj_pt) {
+          // 如果当前overlap和“低优先级轨迹片段”有重合，
+          // 表示当前时刻的轨迹下，会和动态障碍物有碰撞风险，因为此片段对应“借道”，会很危险
           if (IsSWithinADCLowRoadRightSegment(overlapping_s.first) ||
               IsSWithinADCLowRoadRightSegment(overlapping_s.second)) {
             *is_caution_obstacle = true;
@@ -535,6 +597,8 @@ bool STObstaclesProcessor::ComputeObstacleSTBoundary(
       }
       is_obs_first_traj_pt = false;
     }
+    // 防止存在这样一个动态障碍物，只有一个时刻的traj pt和ego轨迹有overlap
+    // 说明这个动态障碍物 在ego轨迹上 存在的时间很短
     if (lower_points->size() == 1) {
       lower_points->emplace_back(lower_points->front().s(),
                                  lower_points->front().t() + 0.1);
@@ -695,6 +759,7 @@ bool STObstaclesProcessor::IsADCOverlappingWithObstacle(
   return obs_box.HasOverlap(adc_box);
 }
 
+// 输出的gaps在s_min和s_max之间
 std::vector<std::pair<double, double>> STObstaclesProcessor::FindSGaps(
     const std::vector<ObsTEdge>& obstacle_t_edges, double s_min, double s_max) {
   std::vector<std::pair<double, int>> obs_s_edges;
@@ -716,6 +781,7 @@ std::vector<std::pair<double, double>> STObstaclesProcessor::FindSGaps(
         }
       });
 
+  // 统计empty interval作为s_gap
   std::vector<std::pair<double, double>> s_gaps;
   int num_st_obs = 1;
   double prev_open_s = 0.0;

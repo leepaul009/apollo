@@ -353,6 +353,7 @@ bool RouteSegments::CanDriveFrom(const LaneWaypoint &waypoint) const {
   }
 
   // 3. the waypoint and the projected lane should not be separated apart.
+  // 跨三车道是不允许的
   double waypoint_left_width = 0.0;
   double waypoint_right_width = 0.0;
   waypoint.lane->GetWidth(waypoint.s, &waypoint_left_width,

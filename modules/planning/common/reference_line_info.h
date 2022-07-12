@@ -315,6 +315,7 @@ class ReferenceLineInfo {
   planning_internal::Debug debug_;
   LatencyStats latency_stats_;
 
+  // a "RouteSegments" is a passage, including multiple lane segments, or lanes
   hdmap::RouteSegments lanes_;
 
   bool is_on_reference_line_ = false;

@@ -49,7 +49,7 @@ PiecewiseJerkProblem::PiecewiseJerkProblem(
 }
 
 OSQPData* PiecewiseJerkProblem::FormulateProblem() {
-  // calculate kernel
+  // calculate kernel 代价函数
   std::vector<c_float> P_data;
   std::vector<c_int> P_indices;
   std::vector<c_int> P_indptr;
@@ -149,9 +149,9 @@ void PiecewiseJerkProblem::CalculateAffineConstraint(
   std::vector<std::vector<std::pair<c_int, c_float>>> variables(
       num_of_variables);
 
-  int constraint_index = 0;
+  int constraint_index = 0; // row of matrix
   // set x, x', x'' bounds
-  for (int i = 0; i < num_of_variables; ++i) {
+  for (int i = 0; i < num_of_variables; ++i) { // col of matrix
     if (i < n) {
       variables[i].emplace_back(constraint_index, 1.0);
       lower_bounds->at(constraint_index) =
@@ -241,14 +241,14 @@ void PiecewiseJerkProblem::CalculateAffineConstraint(
   CHECK_EQ(constraint_index, num_of_constraints);
 
   int ind_p = 0;
-  for (int i = 0; i < num_of_variables; ++i) {
+  for (int i = 0; i < num_of_variables; ++i) { // col index of matrix
     A_indptr->push_back(ind_p);
     for (const auto& variable_nz : variables[i]) {
       // coefficient
-      A_data->push_back(variable_nz.second);
+      A_data->push_back(variable_nz.second); // matrix value
 
       // constraint index
-      A_indices->push_back(variable_nz.first);
+      A_indices->push_back(variable_nz.first); // row index of matrix
       ++ind_p;
     }
   }

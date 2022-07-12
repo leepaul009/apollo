@@ -42,7 +42,7 @@ class ResultGenerator {
  private:
   struct PassageInfo {
     std::vector<NodeWithRange> nodes;
-    ChangeLaneType change_lane_type;
+    ChangeLaneType change_lane_type; // 当前passage和下一个passage之间的关系
     PassageInfo() = default;
     PassageInfo(const std::vector<NodeWithRange>& _nodes,
                 ChangeLaneType _change_lane_type)

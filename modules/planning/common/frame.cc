@@ -191,6 +191,7 @@ bool Frame::CreateReferenceLineInfo(
 
   bool has_valid_reference_line = false;
   for (auto &ref_info : reference_line_info_) {
+    // ref_line_info的初始化，生成SL,ST
     if (!ref_info.Init(obstacles())) {
       AERROR << "Failed to init reference line";
     } else {
@@ -330,6 +331,7 @@ Status Frame::Init(
     AERROR << "failed to init frame:" << status.ToString();
     return status;
   }
+  // import method
   if (!CreateReferenceLineInfo(reference_lines, segments)) {
     const std::string msg = "Failed to init reference line info.";
     AERROR << msg;
