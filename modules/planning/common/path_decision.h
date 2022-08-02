@@ -65,7 +65,9 @@ class PathDecision {
                          const SLBoundary &adc_sl_boundary);
 
  private:
-  // 在frame初始化中处理
+  // 在frame初始化、ref_line_info初始中，被赋值
+  // 维护属于frame的内部obstacle，每个预测轨迹对应一个"内部obstacle"
+  // frame中也维护了一份obstacles_
   IndexedList<std::string, Obstacle> obstacles_;
   MainStop main_stop_;
   double stop_reference_line_s_ = std::numeric_limits<double>::max();

@@ -263,12 +263,15 @@ bool RouteSegments::GetWaypoint(const double s, LaneWaypoint *waypoint) const {
   return has_projection;
 }
 
+// sl_point是对于LaneSegments而言的，所以s是LaneSegment上的纵向位置
+// LaneWayPoint是对于lane而言的，所以s是lane_s
 bool RouteSegments::GetProjection(const common::math::Vec2d &point,
                                   common::SLPoint *sl_point,
                                   LaneWaypoint *waypoint) const {
   double min_l = std::numeric_limits<double>::infinity();
   double accumulated_s = 0.0;
   bool has_projection = false;
+  // 遍历passage内的每一个laneSegment（约等于topoNode）
   for (auto iter = begin(); iter != end();
        accumulated_s += (iter->end_s - iter->start_s), ++iter) {
     double lane_s = 0.0;
@@ -288,7 +291,10 @@ bool RouteSegments::GetProjection(const common::math::Vec2d &point,
       lane_s = std::min(iter->end_s, lane_s);
       min_l = std::fabs(lane_l);
       sl_point->set_l(lane_l);
+      // 减去iter->start_s目的：防止当前iter对应的topoNode是次节点
+      // sl_point是对于LaneSegments而言的，所以s是LaneSegment上的纵向位置
       sl_point->set_s(lane_s - iter->start_s + accumulated_s);
+      // LaneWayPoint是对于lane而言的，所以s是lane_s
       waypoint->lane = iter->lane;
       waypoint->s = lane_s;
     }

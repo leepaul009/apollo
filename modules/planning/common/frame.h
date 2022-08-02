@@ -227,6 +227,8 @@ class Frame {
    **/
   const ReferenceLineInfo *drive_reference_line_info_ = nullptr;
 
+  // ThreadSafeIndexedObstacles = ThreadSafeIndexedList<std::string, Obstacle>
+  // obs_id到obs的mapping
   ThreadSafeIndexedObstacles obstacles_;
 
   std::unordered_map<std::string, const perception::TrafficLight *>

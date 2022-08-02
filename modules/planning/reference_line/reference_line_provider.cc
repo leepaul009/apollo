@@ -145,7 +145,7 @@ void ReferenceLineProvider::Stop() {
   }
 }
 
-// 在内部变量中保存输入
+// update route_segments_ and reference_lines_ with input
 void ReferenceLineProvider::UpdateReferenceLine(
     const std::list<ReferenceLine> &reference_lines,
     const std::list<hdmap::RouteSegments> &route_segments) {
@@ -285,6 +285,8 @@ void ReferenceLineProvider::PrioritzeChangeLane(
   CHECK_NOTNULL(route_segments);
   auto iter = route_segments->begin();
   while (iter != route_segments->end()) {
+    // for segment that ego not located in, 
+    // move the segment(iter) from *route_segments to the position before route_segments->begin()
     if (!iter->IsOnSegment()) {
       route_segments->splice(route_segments->begin(), *route_segments, iter);
       break;
@@ -541,6 +543,7 @@ bool ReferenceLineProvider::GetNearestWayPointFromNavigationPath(
   return waypoint->lane != nullptr;
 }
 
+// 根据当前ego位置和routing数据，更新input segments
 bool ReferenceLineProvider::CreateRouteSegments(
     const common::VehicleState &vehicle_state,
     std::list<hdmap::RouteSegments> *segments) {
@@ -558,6 +561,8 @@ bool ReferenceLineProvider::CreateRouteSegments(
   return !segments->empty();
 }
 
+// CreateReferenceLine被计算参考线的线程调用
+// 如果开启“用线程计算Ref_line”，则输入为空，由pnc_map更新input segments
 bool ReferenceLineProvider::CreateReferenceLine(
     std::list<ReferenceLine> *reference_lines,
     std::list<hdmap::RouteSegments> *segments) {
@@ -575,6 +580,9 @@ bool ReferenceLineProvider::CreateReferenceLine(
     std::lock_guard<std::mutex> lock(routing_mutex_);
     routing = routing_;
   }
+
+  // 1. 调用pnc_map（use routing data to update pnc_map_）
+  // 此步骤只在重新routing时进行
   bool is_new_routing = false;
   {
     // Update routing in pnc_map
@@ -588,13 +596,20 @@ bool ReferenceLineProvider::CreateReferenceLine(
     }
   }
 
-  // segments表示多条passage
+  // 2. 调用pnc_map
+  // pnc_map会主动计算ego的位置，在哪个RoadSegment上，以及投影在左右两条（如存在）passage的位置，
+  // 在此位置前后的一定范围内，为每条passage建立RouteSegments，此过程中RouteSegments也可能被延长
+  // 但是，即便RouteSegments可以被延长，在下次“计算参考线”之前，系统只维护着“当前RoadSeg范围内的”passage作为参考线
+  // 换言之，不在RoadSeg范围内的passage对应的参考线 是系统没有的，于是，在参考线更新前，系统的动作被限制住了
+  // TODO: 这里的segments容易一起歧义：表示多条passage
   if (!CreateRouteSegments(vehicle_state, segments)) {
     AERROR << "Failed to create reference line from routing";
     return false;
   }
+
+  //
   if (is_new_routing || !FLAGS_enable_reference_line_stitching) {
-    // smooth per segment
+    // smooth per extended passage
     for (auto iter = segments->begin(); iter != segments->end();) {
       reference_lines->emplace_back();
       if (!SmoothRouteSegment(*iter, &reference_lines->back())) {
@@ -628,11 +643,15 @@ bool ReferenceLineProvider::CreateReferenceLine(
   return true;
 }
 
+// extend and smooth per RouteSegments/Ref_line(RouteSegments here is an extended passage)
 bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
                                                 RouteSegments *segments,
                                                 ReferenceLine *reference_line) {
   RouteSegments segment_properties;
   segment_properties.SetProperties(*segments);
+  
+  // 1. get previous RouteSegments connecting to current RouteSegments
+  // TODO: 多个参考线的组织方式 应该换成：以LaneSegment为索引，组织参考线。这种办法可以节省搜索开销，并且很直观
   auto prev_segment = route_segments_.begin();
   auto prev_ref = reference_lines_.begin();
   while (prev_segment != route_segments_.end()) {
@@ -642,6 +661,7 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
     ++prev_segment;
     ++prev_ref;
   }
+  // can not get prev RouteSegments, create ref_line with input RouteSegments
   if (prev_segment == route_segments_.end()) {
     if (!route_segments_.empty() && segments->IsOnSegment()) {
       AWARN << "Current route segment is not connected with previous route "
@@ -650,6 +670,8 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
     // 前后的route segments连不上， 则重新生成reference_line
     return SmoothRouteSegment(*segments, reference_line);
   }
+  
+  // 2. check if remain distance of previous RouteSegments is enough for planning
   common::SLPoint sl_point;
   Vec2d vec2d(state.x(), state.y());
   LaneWaypoint waypoint;
@@ -662,6 +684,7 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
   const double remain_s = prev_segment_length - sl_point.s();
   const double look_forward_required_distance =
       PncMap::LookForwardDistance(state.linear_velocity());
+  // use previous RouteSegments and ref_line
   if (remain_s > look_forward_required_distance) {
     *segments = *prev_segment;
     segments->SetProperties(segment_properties);
@@ -671,11 +694,11 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
            << " and no need to extend";
     return true;
   }
-  double future_start_s =
-      std::max(sl_point.s(), prev_segment_length -
-                                 FLAGS_reference_line_stitch_overlap_distance);
-  double future_end_s =
-      prev_segment_length + FLAGS_look_forward_extend_distance;
+  
+  // 3. extend previous RouteSegments forward and backward
+  double future_start_s = std::max(sl_point.s(), 
+    prev_segment_length - FLAGS_reference_line_stitch_overlap_distance); // - 20
+  double future_end_s = prev_segment_length + FLAGS_look_forward_extend_distance; // + 50
   RouteSegments shifted_segments;
   std::unique_lock<std::mutex> lock(pnc_map_mutex_);
   if (!pnc_map_->ExtendSegments(*prev_segment, future_start_s, future_end_s,
@@ -685,6 +708,8 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
     return SmoothRouteSegment(*segments, reference_line);
   }
   lock.unlock();
+  // if previous RouteSegments include extended RouteSegments，
+  // then prev RouteSegments and prev ref_line should be used rather than creating new
   if (prev_segment->IsWaypointOnSegment(shifted_segments.LastWaypoint())) {
     *segments = *prev_segment;
     segments->SetProperties(segment_properties);
@@ -692,6 +717,8 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
     ADEBUG << "Could not further extend reference line";
     return true;
   }
+  
+  // 4. 优化参考线
   hdmap::Path path(shifted_segments);
   ReferenceLine new_ref(path);
   if (!SmoothPrefixedReferenceLine(*prev_ref, new_ref, reference_line)) {
@@ -706,6 +733,8 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
     AWARN << "Failed to stitch route segments";
     return SmoothRouteSegment(*segments, reference_line);
   }
+
+  // 5. shrink
   *segments = shifted_segments;
   segments->SetProperties(segment_properties);
   common::SLPoint sl;
@@ -718,6 +747,7 @@ bool ReferenceLineProvider::ExtendReferenceLine(const VehicleState &state,
 
 // 根据vehicle在reference_line上的frenet点，向前后各保留一定距离的ReferenceLine和RouteSegments,
 // 后方的距离由参数确定，前方的距离由第一个违反角度限制的参考点确认
+// TODO: forward限制会不会导致 某些特殊路段上 “参考线过短” => 应该交给motion planning依照动力学限制来判断
 bool ReferenceLineProvider::Shrink(const common::SLPoint &sl, // vehicle在reference_line上的frenet点
                                    ReferenceLine *reference_line,
                                    RouteSegments *segments) {
@@ -950,6 +980,7 @@ bool ReferenceLineProvider::SmoothPrefixedReferenceLine(
   return true;
 }
 
+// 参考线优化入口函数
 bool ReferenceLineProvider::SmoothReferenceLine(
     const ReferenceLine &raw_reference_line, ReferenceLine *reference_line) {
   if (!FLAGS_enable_smooth_reference_line) {

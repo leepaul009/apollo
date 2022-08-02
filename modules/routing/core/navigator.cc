@@ -219,6 +219,7 @@ bool Navigator::SearchRouteByStrategy(
 
 bool Navigator::SearchRoute(const RoutingRequest& request,
                             RoutingResponse* const response) {
+  // 1. preparation
   // 确认request.waypoint.id(lane)存在于graph_
   if (!ShowRequestInfo(request, graph_.get())) {
     SetErrorCode(ErrorCode::ROUTING_ERROR_REQUEST,
@@ -242,6 +243,7 @@ bool Navigator::SearchRoute(const RoutingRequest& request,
     return false;
   }
 
+  // 2. search
   std::vector<NodeWithRange> result_nodes;
   if (!SearchRouteByStrategy(graph_.get(), way_nodes, way_s, &result_nodes)) {
     SetErrorCode(ErrorCode::ROUTING_ERROR_RESPONSE,
@@ -257,6 +259,7 @@ bool Navigator::SearchRoute(const RoutingRequest& request,
   result_nodes.front().SetStartS(request.waypoint().begin()->s());
   result_nodes.back().SetEndS(request.waypoint().rbegin()->s());
 
+  // 3. create response
   // 扩展result_nodes（添加一些并行node），
   // 以RoadSegment/Passage/LaneSegment的结构重构routing结果，存储在response中
   if (!result_generator_->GeneratePassageRegion(

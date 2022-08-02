@@ -248,6 +248,7 @@ class Obstacle {
   common::math::Box2d perception_bounding_box_;
   common::math::Polygon2d perception_polygon_;
 
+  // used for em-planer
   std::vector<ObjectDecisionType> decisions_;
   std::vector<std::string> decider_tags_;
   SLBoundary sl_boundary_;
@@ -260,12 +261,10 @@ class Obstacle {
 
   // for keep_clear usage only
   bool is_blocking_obstacle_ = false;
-
   bool is_lane_blocking_ = false;
-
   bool is_lane_change_blocking_ = false;
-
   bool is_caution_level_obstacle_ = false;
+
 
   double min_radius_stop_distance_ = -1.0;
 
@@ -289,3 +288,33 @@ typedef ThreadSafeIndexedList<std::string, Obstacle> ThreadSafeIndexedObstacles;
 
 }  // namespace planning
 }  // namespace apollo
+
+/*
+
+PredictionObstacle {
+  optional apollo.perception.PerceptionObstacle perception_obstacle = 1;
+  optional double timestamp = 2;  // GPS time in seconds
+  optional double predicted_period = 3;
+  repeated Trajectory trajectory = 4;
+
+  optional ObstacleIntent intent = 5;
+  optional ObstaclePriority priority = 6;
+  optional ObstacleInteractiveTag interactive_tag = 9;
+  optional bool is_static = 7 [default = false];
+  repeated Feature feature = 8; // earliest sequence
+}
+
+PredictionObstacles {
+  optional apollo.common.Header header = 1; // timestamp is included in header
+  repeated PredictionObstacle prediction_obstacle = 2;
+  optional apollo.common.ErrorCode perception_error_code = 3;
+
+  optional double start_timestamp = 4;
+  optional double end_timestamp = 5;
+
+  optional Intent intent = 6; // self driving car intent
+  optional Scenario scenario = 7;
+}
+
+*/
+

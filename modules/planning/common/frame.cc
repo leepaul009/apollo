@@ -156,6 +156,7 @@ void Frame::UpdateReferenceLinePriority(
   }
 }
 
+// input是参考线模块生成的
 bool Frame::CreateReferenceLineInfo(
     const std::list<ReferenceLine> &reference_lines,
     const std::list<hdmap::RouteSegments> &segments) {
@@ -163,6 +164,7 @@ bool Frame::CreateReferenceLineInfo(
   auto ref_line_iter = reference_lines.begin();
   auto segments_iter = segments.begin();
   while (ref_line_iter != reference_lines.end()) {
+    // 输入的RouteSegments已经靠近goal
     if (segments_iter->StopForDestination()) {
       is_near_destination_ = true;
     }
@@ -184,6 +186,7 @@ bool Frame::CreateReferenceLineInfo(
                                                              &second_sl)) {
       return false;
     }
+    // TODO: 两点的坐标系不同，计算得到的offset有何意义？
     const double offset = first_sl.l() - second_sl.l();
     reference_line_info_.front().SetOffsetToOtherReferenceLine(offset);
     reference_line_info_.back().SetOffsetToOtherReferenceLine(-offset);
@@ -337,6 +340,7 @@ Status Frame::Init(
     AERROR << msg;
     return Status(ErrorCode::PLANNING_ERROR, msg);
   }
+  // future_route_waypoints维护在RL_provider.pncMap中，表示下一个waypoint开始的所有waypoints
   future_route_waypoints_ = future_route_waypoints;
   return Status::OK();
 }
@@ -352,6 +356,8 @@ Status Frame::InitFrameData(
     const EgoInfo *ego_info) {
   hdmap_ = hdmap::HDMapUtil::BaseMapPtr();
   CHECK_NOTNULL(hdmap_);
+  
+  // 1. update vehicle state
   vehicle_state_ = vehicle_state_provider->vehicle_state();
   if (!util::IsVehicleStateValid(vehicle_state_)) {
     AERROR << "Adc init point is not set";
@@ -365,10 +371,15 @@ Status Frame::InitFrameData(
     AlignPredictionTime(vehicle_state_.timestamp(), &prediction);
     local_view_.prediction_obstacles->CopyFrom(prediction);
   }
+  
+  // update obstacles: store info into obstacles_
   for (auto &ptr :
        Obstacle::CreateObstacles(*local_view_.prediction_obstacles)) {
+    // 返回的ptr四unique_ptr，创建好的obs对向立即被维护在obstacles_中
     AddObstacle(*ptr);
   }
+
+  // TODO: 车速几乎为0时，要check碰撞？
   if (planning_start_point_.v() < 1e-3) {
     const auto *collision_obstacle = FindCollisionObstacle(ego_info);
     if (collision_obstacle != nullptr) {
@@ -481,13 +492,15 @@ void Frame::ReadTrafficLights() {
   if (traffic_light_detection == nullptr) {
     return;
   }
+  // check delay time
   const double delay = traffic_light_detection->header().timestamp_sec() -
                        Clock::NowInSeconds();
-  if (delay > FLAGS_signal_expire_time_sec) {
+  if (delay > FLAGS_signal_expire_time_sec) { // FLAGS_signal_expire_time_sec=5s
     ADEBUG << "traffic signals msg is expired, delay = " << delay
            << " seconds.";
     return;
   }
+  
   for (const auto &traffic_light : traffic_light_detection->traffic_light()) {
     traffic_lights_[traffic_light.id()] = &traffic_light;
   }
@@ -508,6 +521,7 @@ perception::TrafficLight Frame::GetSignal(
   return *result;
 }
 
+// read to frame with action: keep, LCL/R, pull_over, stop...
 void Frame::ReadPadMsgDrivingAction() {
   if (local_view_.pad_msg) {
     if (local_view_.pad_msg->has_action()) {

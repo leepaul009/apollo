@@ -669,9 +669,10 @@ bool ReferenceLine::GetSLBoundary(const common::math::Box2d& box,
   double end_s(std::numeric_limits<double>::lowest());
   double start_l(std::numeric_limits<double>::max());
   double end_l(std::numeric_limits<double>::lowest());
+
+  // 得到box的四角的点的sl坐标
   std::vector<common::math::Vec2d> corners;
   box.GetAllCorners(&corners);
-
   // The order must be counter-clockwise
   std::vector<SLPoint> sl_corners;
   for (const auto& point : corners) {
@@ -684,12 +685,14 @@ bool ReferenceLine::GetSLBoundary(const common::math::Box2d& box,
     sl_corners.push_back(std::move(sl_point));
   }
 
+  // 为sl_boundary添加boundary_point(SLPoint)
   for (size_t i = 0; i < corners.size(); ++i) {
     auto index0 = i;
     auto index1 = (i + 1) % corners.size();
     const auto& p0 = corners[index0];
     const auto& p1 = corners[index1];
 
+    // 因为4角的点，在frenet坐标系下不能很好的描述“车辆轮廓”，所有要考虑mid_point
     const auto p_mid = (p0 + p1) * 0.5;
     SLPoint sl_point_mid;
     if (!XYToSL(p_mid, &sl_point_mid)) {
@@ -697,21 +700,22 @@ bool ReferenceLine::GetSLBoundary(const common::math::Box2d& box,
              << " on reference line.";
       return false;
     }
-
+    // 从pt0到pt1的向量
     Vec2d v0(sl_corners[index1].s() - sl_corners[index0].s(),
              sl_corners[index1].l() - sl_corners[index0].l());
-
+    // 从pt0到pt_mid的向量
     Vec2d v1(sl_point_mid.s() - sl_corners[index0].s(),
              sl_point_mid.l() - sl_corners[index0].l());
 
     *sl_boundary->add_boundary_point() = sl_corners[index0];
 
     // sl_point is outside of polygon; add to the vertex list
-    // v0 x v1
+    // v0 x v1 = |v0|*|v1|*sin(theta)
+    // 当v1在v0的外面时，夹角是负的（顺时针）
     if (v0.CrossProd(v1) < 0.0) {
       *sl_boundary->add_boundary_point() = sl_point_mid;
     }
-  }
+  } // end for loop to corners
 
   for (const auto& sl_point : sl_boundary->boundary_point()) {
     start_s = std::fmin(start_s, sl_point.s());

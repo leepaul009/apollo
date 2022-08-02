@@ -58,12 +58,14 @@ ReferenceLineInfo::ReferenceLineInfo(const common::VehicleState& vehicle_state,
 
 bool ReferenceLineInfo::Init(const std::vector<const Obstacle*>& obstacles) {
   const auto& param = VehicleConfigHelper::GetConfig().vehicle_param();
-  // stitching point
+  // 1. 为ego的初始轨迹点（on prev traj）和ego的真实位置点 构建box
+  // （这两个点代表后轴中心，和box中点是不同的）
+  // stitching point (is point on prev planned trajectory?)
   const auto& path_point = adc_planning_point_.path_point();
   Vec2d position(path_point.x(), path_point.y());
   Vec2d vec_to_center(
       (param.front_edge_to_center() - param.back_edge_to_center()) / 2.0,
-      (param.left_edge_to_center() - param.right_edge_to_center()) / 2.0);
+      (param.left_edge_to_center() - param.right_edge_to_center()) / 2.0); // vector from car rear_axis to center
   Vec2d center(position + vec_to_center.rotate(path_point.theta()));
   Box2d box(center, path_point.theta(), param.length(), param.width());
   // realtime vehicle position
@@ -73,13 +75,16 @@ bool ReferenceLineInfo::Init(const std::vector<const Obstacle*>& obstacles) {
   Box2d vehicle_box(vehicle_center, vehicle_state_.heading(), param.length(),
                     param.width());
 
+  // 2. 根据“ego的初始轨迹点构成的box” 构造ego在sl图上的boundary信息
   if (!reference_line_.GetSLBoundary(box, &adc_sl_boundary_)) {
     AERROR << "Failed to get ADC boundary from box: " << box.DebugString();
     return false;
   }
 
+  // 3. 根据adc_sl_boundary_，找到所有种类的first_overlap（存在于参考线上的），并且按照其start_s排序
   InitFirstOverlaps();
 
+  // 检查ego的位置，看其位置是否相对于当前参考线不合理
   if (adc_sl_boundary_.end_s() < 0 ||
       adc_sl_boundary_.start_s() > reference_line_.Length()) {
     AWARN << "Vehicle SL " << adc_sl_boundary_.ShortDebugString()
@@ -93,6 +98,8 @@ bool ReferenceLineInfo::Init(const std::vector<const Obstacle*>& obstacles) {
     return false;
   }
   is_on_reference_line_ = reference_line_.IsOnLane(adc_sl_boundary_);
+
+  // 4. 将frame的内部obstacles添加到ref_line_info中
   if (!AddObstacles(obstacles)) {
     AERROR << "Failed to add obstacles to reference line";
     return false;
@@ -212,16 +219,20 @@ bool ReferenceLineInfo::GetNeighborLaneInfo(
   return true;
 }
 
+// 找到 和ego重合的、且overlap.start_pt最小的overlap
 bool ReferenceLineInfo::GetFirstOverlap(
     const std::vector<hdmap::PathOverlap>& path_overlaps,
     hdmap::PathOverlap* path_overlap) {
   CHECK_NOTNULL(path_overlap);
-  const double start_s = adc_sl_boundary_.end_s();
-  static constexpr double kMaxOverlapRange = 500.0;
-  double overlap_min_s = kMaxOverlapRange;
+  const double start_s = adc_sl_boundary_.end_s(); // max s
 
+  // 找到“ego车后方向上”最靠后的、并且和ego车身范围重合的overlap
+  static constexpr double kMaxOverlapRange = 500.0;
+  double overlap_min_s = kMaxOverlapRange; // 选中的overlap的start_pt位置
   auto overlap_min_s_iter = path_overlaps.end();
+
   for (auto iter = path_overlaps.begin(); iter != path_overlaps.end(); ++iter) {
+    // 忽略“在ego前端点之后”的overlap
     if (iter->end_s < start_s) {
       continue;
     }
@@ -239,8 +250,9 @@ bool ReferenceLineInfo::GetFirstOverlap(
   return overlap_min_s < kMaxOverlapRange;
 }
 
+// 找到所有种类的first_overlap（存在于参考线上的），并且按照其start_s排序
 void ReferenceLineInfo::InitFirstOverlaps() {
-  const auto& map_path = reference_line_.map_path();
+  const auto& map_path = reference_line_.map_path(); // hdmap::Path
   // clear_zone
   hdmap::PathOverlap clear_area_overlap;
   if (GetFirstOverlap(map_path.clear_area_overlaps(), &clear_area_overlap)) {
@@ -360,12 +372,14 @@ Obstacle* ReferenceLineInfo::AddObstacle(const Obstacle* obstacle) {
     AERROR << "The provided obstacle is empty";
     return nullptr;
   }
+  // 1. 在path_decision_中，添加obstacle（作为副本），此后对此obs的修改和frame中维护的obs无关
   auto* mutable_obstacle = path_decision_.AddObstacle(*obstacle);
   if (!mutable_obstacle) {
     AERROR << "failed to add obstacle " << obstacle->Id();
     return nullptr;
   }
 
+  // 2. 为当前obstacle创建参考线上的SLBoundary，path_decision_的obs副本负责维护此SLBoundary
   SLBoundary perception_sl;
   // SLBoundary is boundary of obstacle bbox refer to reference_line_
   if (!reference_line_.GetSLBoundary(obstacle->PerceptionBoundingBox(),
@@ -381,6 +395,7 @@ Obstacle* ReferenceLineInfo::AddObstacle(const Obstacle* obstacle) {
     ADEBUG << "obstacle [" << obstacle->Id() << "] is NOT lane blocking.";
   }
 
+  // 3. 判断无关obs
   if (IsIrrelevantObstacle(*mutable_obstacle)) {
     ObjectDecisionType ignore;
     ignore.mutable_ignore();
@@ -429,6 +444,7 @@ bool ReferenceLineInfo::AddObstacles(
   return true;
 }
 
+// 当ego不是变道时，其身后的obstacle为无关obs，超出参考线范围的obs为无关obs
 bool ReferenceLineInfo::IsIrrelevantObstacle(const Obstacle& obstacle) {
   if (obstacle.IsCautionLevelObstacle()) {
     return false;

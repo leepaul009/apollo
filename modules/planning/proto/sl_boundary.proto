@@ -26,5 +26,5 @@ message SLBoundary {
   optional double end_s = 2;
   optional double start_l = 3;
   optional double end_l = 4;
-  repeated apollo.common.SLPoint boundary_point = 5;
+  repeated apollo.common.SLPoint boundary_point = 5; // include s,l value
 }

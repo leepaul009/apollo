@@ -102,6 +102,7 @@ message Lane {
   optional LaneDirection direction = 19;
 
   // Association between central point to closest road boundary.
+  // 车道中心线到道路的物理边界的距离?
   repeated LaneSampleAssociation left_road_sample = 20;
   repeated LaneSampleAssociation right_road_sample = 21;
 

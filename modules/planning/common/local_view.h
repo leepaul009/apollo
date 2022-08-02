@@ -48,3 +48,15 @@ struct LocalView {
 
 }  // namespace planning
 }  // namespace apollo
+
+/*
+PadMessage: DrivingAction {
+  NONE = 100;
+  FOLLOW = 0;
+  CHANGE_LEFT = 1;
+  CHANGE_RIGHT = 2;
+  PULL_OVER = 3;
+  STOP = 4;
+  RESUME_CRUISE = 5;
+};
+*/

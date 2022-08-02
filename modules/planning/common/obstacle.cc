@@ -193,15 +193,44 @@ bool Obstacle::IsValidPerceptionObstacle(const PerceptionObstacle& obstacle) {
   return true;
 }
 
+// 输入的predictions定义于："modules/prediction/proto/prediction_obstacle.pb.h"
+/*
+PredictionObstacle {
+  optional apollo.perception.PerceptionObstacle perception_obstacle = 1;
+  optional double timestamp = 2;  // GPS time in seconds
+  optional double predicted_period = 3;
+  repeated Trajectory trajectory = 4;
+
+  optional ObstacleIntent intent = 5;
+  optional ObstaclePriority priority = 6;
+  optional ObstacleInteractiveTag interactive_tag = 9;
+  optional bool is_static = 7 [default = false];
+  repeated Feature feature = 8; // earliest sequence
+}
+PredictionObstacles {
+  optional apollo.common.Header header = 1; // timestamp is included in header
+  repeated PredictionObstacle prediction_obstacle = 2;
+  optional apollo.common.ErrorCode perception_error_code = 3;
+
+  optional double start_timestamp = 4;
+  optional double end_timestamp = 5;
+
+  optional Intent intent = 6; // self driving car intent
+  optional Scenario scenario = 7;
+}
+
+*/
 std::list<std::unique_ptr<Obstacle>> Obstacle::CreateObstacles(
     const prediction::PredictionObstacles& predictions) {
   std::list<std::unique_ptr<Obstacle>> obstacles;
+  // predictions来自预测模块
   for (const auto& prediction_obstacle : predictions.prediction_obstacle()) {
     if (!IsValidPerceptionObstacle(prediction_obstacle.perception_obstacle())) {
       AERROR << "Invalid perception obstacle: "
              << prediction_obstacle.perception_obstacle().DebugString();
       continue;
     }
+    
     const auto perception_id =
         std::to_string(prediction_obstacle.perception_obstacle().id());
     if (prediction_obstacle.trajectory().empty()) {
@@ -212,8 +241,10 @@ std::list<std::unique_ptr<Obstacle>> Obstacle::CreateObstacles(
       continue;
     }
 
+    // 为每一个trajectory创建对应的obstacle
     int trajectory_index = 0;
     for (const auto& trajectory : prediction_obstacle.trajectory()) {
+      // 判断 预测轨迹是否valid
       bool is_valid_trajectory = true;
       for (const auto& point : trajectory.trajectory_point()) {
         if (!IsValidTrajectoryPoint(point)) {
@@ -312,6 +343,7 @@ double Obstacle::MinRadiusStopDistance(
   return stop_distance;
 }
 
+// adc_start_s: ego在参考线上的最小s
 void Obstacle::BuildReferenceLineStBoundary(const ReferenceLine& reference_line,
                                             const double adc_start_s) {
   const auto& adc_param =

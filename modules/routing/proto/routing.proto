@@ -18,6 +18,8 @@ message LaneWaypoint {
   optional double heading = 4;
 }
 
+// id: lane id, start_s/end_s: lane segment a part of Lane or whole Lane
+// thus lane segment has a range.
 message LaneSegment {
   optional string id = 1;
   optional double start_s = 2;
@@ -77,6 +79,7 @@ message Passage {
   repeated LaneSegment segment = 1;
   optional bool can_exit = 2;
   optional ChangeLaneType change_lane_type = 3 [default = FORWARD];
+  // optional bool is_root; // if false, the passage is suc-connected with prev road_segment
 }
 
 message RoadSegment {

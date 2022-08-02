@@ -52,8 +52,8 @@ class DependencyInjector {
 
  private:
   PlanningContext planning_context_;
-  FrameHistory frame_history_;
-  History history_;
+  FrameHistory frame_history_; // Frame holds all data for one planning cycle.
+  History history_; // each frame's adc_traj and decision2obj
   EgoInfo ego_info_;
   apollo::common::VehicleStateProvider vehicle_state_;
   LearningBasedData learning_based_data_;

@@ -31,6 +31,7 @@
 namespace apollo {
 namespace planning {
 
+// ObjectDecisionType is defined in planning/proto/decision.proto, 
 class HistoryObjectDecision {
  public:
   HistoryObjectDecision() = default;
@@ -82,6 +83,8 @@ class HistoryObjectStatus {
   ObjectStatus object_status_;
 };
 
+// ObjectStatus is defined in planning/proto/decision.proto, 
+// ObjectStatus includes decision_type that indicate ego decision to this object
 class HistoryStatus {
  public:
   HistoryStatus() = default;
@@ -106,8 +109,8 @@ class History {
   HistoryStatus* mutable_history_status() { return &history_status_; }
 
  private:
-  std::list<HistoryFrame> history_frames_;
-  HistoryStatus history_status_;
+  std::list<HistoryFrame> history_frames_;  // store each frame's info(adc_traj, and the decision type to obstacle)
+  HistoryStatus history_status_;            // store the decision type to obstacle
 };
 
 }  // namespace planning

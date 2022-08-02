@@ -30,7 +30,9 @@
 #include "modules/planning/proto/learning_data.pb.h"
 #include "modules/planning/proto/pad_msg.pb.h"
 #include "modules/planning/proto/planning.pb.h"
+
 #include "modules/planning/proto/planning_config.pb.h"
+
 #include "modules/prediction/proto/prediction_obstacle.pb.h"
 #include "modules/routing/proto/routing.pb.h"
 #include "modules/storytelling/proto/story.pb.h"

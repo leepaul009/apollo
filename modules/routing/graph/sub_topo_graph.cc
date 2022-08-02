@@ -115,20 +115,24 @@ SubTopoGraph::SubTopoGraph(
 
 SubTopoGraph::~SubTopoGraph() {}
 
+// 输出的sub_edges的种类和输入的edge的种类保持一致
 void SubTopoGraph::GetSubInEdgesIntoSubGraph(
     const TopoEdge* edge,
     std::unordered_set<const TopoEdge*>* const sub_edges) const {
   const auto* from_node = edge->FromNode();
   const auto* to_node = edge->ToNode();
   std::unordered_set<TopoNode*> sub_nodes;
-  // from_node、to_node其中之一是sub_node，或者to_node内部没有sub_nodes
-  // 则输入edge作为sub_edge
+  // 1.
+  // from_node是sub_node，或者to_node是sub_node，或者to_node是原始节点、但不包含sub_nodes，
+  // 则输入的edge直接作为sub_edges输出。(edge的from_node或者sub_node为次节点，则此edge为次边)
+  // 如果from_node、to_node都不是subNode，并且可以找到to_node的subNode，则执行下一步操作（2.）
   if (from_node->IsSubNode() || to_node->IsSubNode() ||
       !GetSubNodes(to_node, &sub_nodes)) {
     sub_edges->insert(edge);
     return;
   }
-  // 如果to_node内部含有sub_nodes。
+  // 2.
+  // 如果to_node内部含有sub_nodes，则找到指向这些sub_nodes的sub_edges，并且满足sub_edge的from_node匹配。
   // 一种可能：from_node和to_node都是原始node，to_node是goal所在node（含有sub_nodes），
   // edge也是原始edge，但需要找到的是sub_edge(sub_edge:从from_node到sub_node_of_to_node)
   for (const auto* sub_node : sub_nodes) {
@@ -151,6 +155,7 @@ void SubTopoGraph::GetSubOutEdgesIntoSubGraph(
     sub_edges->insert(edge);
     return;
   }
+  // get sub_from_node's sub_edge whose to_node is "target_to_node"
   for (const auto* sub_node : sub_nodes) {
     for (const auto* out_edge : sub_node->OutToAllEdge()) {
       if (out_edge->ToNode() == to_node) {
@@ -175,6 +180,7 @@ const TopoNode* SubTopoGraph::GetSubNodeWithS(const TopoNode* topo_node,
   return sorted_vec[index].GetTopoNode();
 }
 
+// create sub node(with each valid range) and sub edge(if two adjacent sub node is close enough, they will have a sub-edge)
 void SubTopoGraph::InitSubNodeByValidRange(
     const TopoNode* topo_node, const std::vector<NodeSRange>& valid_range) {
   // Attention: no matter topo node has valid_range or not,
@@ -198,7 +204,7 @@ void SubTopoGraph::InitSubNodeByValidRange(
     topo_nodes_.push_back(std::move(sub_topo_node_ptr)); // maintain created node
   }
 
-  // 为 sub_node 创建边（当前后两个节点间距为0，否则没有边，相当于断开连接）
+  // 为 sub_node 创建边（当前后两个节点间距为0,则建立sub-edge，否则没有边，相当于断开连接）
   for (size_t i = 1; i < sub_node_sorted_vec.size(); ++i) {
     auto* pre_node = sub_node_sorted_vec[i - 1];
     auto* next_node = sub_node_sorted_vec[i];
@@ -225,47 +231,56 @@ void SubTopoGraph::InitSubEdge(const TopoNode* topo_node) {
     return;
   }
 
-  // 原始节点的sub_node的边，也要考虑 原始节点的边（以及其邻居节点）
   // 条件符合时，邻居节点有sub_node则为两者的sub_node创建sub_edge，
-  // 如果邻居节点没有sub_node，直接和邻居节点建立sub_edge
+  // 如果邻居节点没有sub_node，直接和邻居节点建立sub_edge，但是因为邻居节点是“原始节点”，所以他不会存储sub_edge
   for (auto* sub_node : sub_nodes) {
     InitInSubNodeSubEdge(sub_node, topo_node->InFromAllEdge());
     InitOutSubNodeSubEdge(sub_node, topo_node->OutToAllEdge());
   }
 }
 
-// 把 原始节点的 所有in_edge
+// 创建 指向sub_node的sub_edge
+// input: 
+//   origin_edge: 指向“次节点sub_node的origNode”的edges（inEdges）
 void SubTopoGraph::InitInSubNodeSubEdge(
     TopoNode* const sub_node,
     const std::unordered_set<const TopoEdge*> origin_edge) {
   std::unordered_set<TopoNode*> other_sub_nodes;
   for (const auto* in_edge : origin_edge) {
-    // 原始节点的前驱节点（prev_node） 有 sub_nodes，
-    // 则考虑 prev_node的sub_nodes 是否可以和 input sub_node 创建sub_edge
+    // 原始节点的前驱节点（from_node）有sub_nodes时:
+    // 如果from_node的sub_nodes 很靠近 输入的sub_node，则创建sub_edge(sub_from_node -> input_sub_node)
     if (GetSubNodes(in_edge->FromNode(), &other_sub_nodes)) {
       for (auto* sub_from_node : other_sub_nodes) {
-        // overlap考虑左右变道关系，如果是前后关系，则只需要两个节点紧紧靠近边缘（起止位置）
+        // 对于变道关系，overlap考虑变道是否有足够的纵向范围。对于前后关系，overlap考虑两个节点是否紧挨着（止、起位置的差异极小）
+        // 如果 sub_from_node 很靠近 sub_node，则为他们建立sub_edge
         if (!sub_from_node->IsOverlapEnough(sub_node, in_edge)) {
           continue;
         }
         std::shared_ptr<TopoEdge> topo_edge_ptr;
         topo_edge_ptr.reset(
             new TopoEdge(in_edge->PbEdge(), sub_from_node, sub_node));
+        // 每个sub_node会在内部存储sub_edge
         sub_node->AddInEdge(topo_edge_ptr.get());
         sub_from_node->AddOutEdge(topo_edge_ptr.get());
         topo_edges_.push_back(std::move(topo_edge_ptr));
       }
-    } // 原始节点的前驱节点 没有 sub_nodes，则考虑 前驱节点 和 input sub_node
+    }
+    // 原始节点的前驱节点（from_node）没有sub_nodes时：
+    // 如果from_node 很靠近 输入的sub_nod，则建立sub_edge(from_node -> input_sub_node)
     else if (in_edge->FromNode()->IsOverlapEnough(sub_node, in_edge)) {
       std::shared_ptr<TopoEdge> topo_edge_ptr;
       topo_edge_ptr.reset(
           new TopoEdge(in_edge->PbEdge(), in_edge->FromNode(), sub_node));
+      // 原始节点不会存储sub_edge
       sub_node->AddInEdge(topo_edge_ptr.get());
       topo_edges_.push_back(std::move(topo_edge_ptr));
     }
   }
 }
 
+// 创建 离开sub_node的sub_edge
+// input: 
+//   origin_edge: 离开“次节点sub_node的origNode”的edges（outEdges）
 void SubTopoGraph::InitOutSubNodeSubEdge(
     TopoNode* const sub_node,
     const std::unordered_set<const TopoEdge*> origin_edge) {

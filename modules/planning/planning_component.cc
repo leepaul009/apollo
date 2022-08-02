@@ -39,7 +39,7 @@ using apollo::routing::RoutingResponse;
 using apollo::storytelling::Stories;
 
 bool PlanningComponent::Init() {
-  // 创建injector_
+  // 创建injector_，它保存了历史数据，历史数据中包括了planning cycle所需的绝大部分数据
   injector_ = std::make_shared<DependencyInjector>();
 
   if (FLAGS_use_navigation_mode) {

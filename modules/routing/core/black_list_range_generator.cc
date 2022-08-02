@@ -153,13 +153,13 @@ void BlackListRangeGenerator::AddBlackMapFromTerminal(
 
   double start_cut_s = MoveSBackward(start_s_adjusted, 0.0);
   range_manager->Add(src_node, start_cut_s, start_cut_s);
-  // 找到src_node节点的 直接、间接“left/right”关系的后继节点
+  // 找到src_node节点的 直接、间接“left/right”关系的后继节点, 添加map（node->range）
   AddBlackMapFromOutParallel(src_node, start_cut_s / start_length,
                              range_manager);
 
   double end_cut_s = MoveSForward(end_s_adjusted, end_length);
   range_manager->Add(dest_node, end_cut_s, end_cut_s);
-  // 找到dest_node节点的 直接、间接“left/right”关系的前驱节点
+  // 找到dest_node节点的 直接、间接“left/right”关系的前驱节点, 添加map（node->range）
   AddBlackMapFromInParallel(dest_node, end_cut_s / end_length, range_manager);
   range_manager->SortAndMerge();
 }

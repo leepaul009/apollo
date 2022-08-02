@@ -135,6 +135,7 @@ Status OnLanePlanning::Init(const PlanningConfig& config) {
 Status OnLanePlanning::InitFrame(const uint32_t sequence_num,
                                  const TrajectoryPoint& planning_start_point,
                                  const VehicleState& vehicle_state) {
+  // 1. 初始化Frame
   frame_.reset(new Frame(sequence_num, local_view_, planning_start_point,
                          vehicle_state, reference_line_provider_.get()));
 
@@ -142,6 +143,7 @@ Status OnLanePlanning::InitFrame(const uint32_t sequence_num,
     return Status(ErrorCode::PLANNING_ERROR, "Fail to init frame: nullptr.");
   }
 
+  // 2. 读取参考线
   std::list<ReferenceLine> reference_lines;
   std::list<hdmap::RouteSegments> segments;
   if (!reference_line_provider_->GetReferenceLines(&reference_lines,
@@ -154,7 +156,7 @@ Status OnLanePlanning::InitFrame(const uint32_t sequence_num,
 
   auto forward_limit =
       hdmap::PncMap::LookForwardDistance(vehicle_state.linear_velocity());
-
+  // shrink参考线和RouteSegments(这里，Segments指的是LaneSegments)
   for (auto& ref_line : reference_lines) {
     if (!ref_line.Segment(Vec2d(vehicle_state.x(), vehicle_state.y()),
                           FLAGS_look_backward_distance, forward_limit)) {
@@ -163,6 +165,7 @@ Status OnLanePlanning::InitFrame(const uint32_t sequence_num,
       return Status(ErrorCode::PLANNING_ERROR, msg);
     }
   }
+  // TODO: segments命名有歧义
   for (auto& seg : segments) {
     if (!seg.Shrink(Vec2d(vehicle_state.x(), vehicle_state.y()),
                     FLAGS_look_backward_distance, forward_limit)) {
@@ -320,6 +323,7 @@ void OnLanePlanning::RunOnce(const LocalView& local_view,
     vehicle_state = AlignTimeStamp(vehicle_state, start_timestamp);
   }
 
+  // 2. 第一次运行时，RL_provider更新routing、并生成参考线
   if (util::IsDifferentRouting(last_routing_, *local_view_.routing)) {
     last_routing_ = *local_view_.routing;
     ADEBUG << "last_routing_:" << last_routing_.ShortDebugString();
@@ -327,6 +331,7 @@ void OnLanePlanning::RunOnce(const LocalView& local_view,
     injector_->planning_context()->mutable_planning_status()->Clear();
     // 更新routing
     reference_line_provider_->UpdateRoutingResponse(*local_view_.routing);
+    // PublicRoadPlanner reinit
     planner_->Init(config_);
   }
 
