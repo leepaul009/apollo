@@ -158,6 +158,158 @@ bool Navigator::MergeRoute(
   return true;
 }
 
+/***************** search space for behavior planner : beg *****************/
+
+bool Navigator::SearchRouteAndSearchSpaceByStrategy(
+    const TopoGraph* graph, 
+    const std::vector<const TopoNode*>& way_nodes,
+    const std::vector<double>& way_s,
+    std::vector<NodeWithRange>* const result_nodes,
+    std::vector<std::vector<NodeWithRange>>* const search_space) const {
+  std::unique_ptr<Strategy> strategy_ptr;
+  strategy_ptr.reset(new AStarStrategy(FLAGS_enable_change_lane_in_result));
+
+  result_nodes->clear();
+  std::vector<NodeWithRange> node_vec;
+  for (size_t i = 1; i < way_nodes.size(); ++i) {
+    const auto* way_start = way_nodes[i - 1];
+    const auto* way_end = way_nodes[i];
+    double way_start_s = way_s[i - 1];
+    double way_end_s = way_s[i];
+
+    TopoRangeManager full_range_manager = topo_range_manager_;
+    // Navigator初始化时，black_list_generator_已经在topo_range_manager_中
+    // 记录了request的black_listed_road/lane
+    // 找到开始节点的直接、间接left、right关系的后继节点，
+    // 找到结尾节点的直接、间接left、right关系的前驱节点，插入临时的full_range_manager
+    black_list_generator_->AddBlackMapFromTerminal(
+        way_start, way_end, way_start_s, way_end_s, &full_range_manager);
+
+    SubTopoGraph sub_graph(full_range_manager.RangeMap());
+    // 从sub_node中选择一个合适的作为start
+    const auto* start = sub_graph.GetSubNodeWithS(way_start, way_start_s);
+    if (start == nullptr) {
+      AERROR << "Sub graph node is nullptr, origin node id: "
+             << way_start->LaneId() << ", s:" << way_start_s;
+      return false;
+    }
+    const auto* end = sub_graph.GetSubNodeWithS(way_end, way_end_s);
+    if (end == nullptr) {
+      AERROR << "Sub graph node is nullptr, origin node id: "
+             << way_end->LaneId() << ", s:" << way_end_s;
+      return false;
+    }
+
+    std::vector<NodeWithRange> cur_result_nodes;
+    if (!strategy_ptr->Search(graph, &sub_graph, start, end,
+                              &cur_result_nodes)) {
+      AERROR << "Failed to search route with waypoint from " << start->LaneId()
+             << " to " << end->LaneId();
+      return false;
+    }
+    node_vec.insert(node_vec.end(), cur_result_nodes.begin(),
+                    cur_result_nodes.end());
+    
+    // compute search space
+    std::vector<std::vector<NodeWithRange>> cur_search_space;
+    if (!strategy_ptr->GetParallelSearchSpace(start, end, 
+        &sub_graph, cur_result_nodes, cur_search_space)) {
+      // report error
+      return false;
+    }
+    search_space->insert(search_space->end(), 
+                         cur_search_space.begin(),
+                         cur_search_space.end());
+  }
+  
+  if (!MergeRoute(node_vec, result_nodes)) {
+    AERROR << "Failed to merge route.";
+    return false;
+  }
+  return true;
+}
+
+
+bool Navigator::SearchRouteAndSearchSpace(const RoutingRequest& request,
+                            RoutingResponse* const response) {
+  // 1. preparation
+  // 确认request.waypoint.id(lane)存在于graph_
+  if (!ShowRequestInfo(request, graph_.get())) {
+    SetErrorCode(ErrorCode::ROUTING_ERROR_REQUEST,
+                 "Error encountered when reading request point!",
+                 response->mutable_status());
+    return false;
+  }
+
+  // 确认已经加载graph
+  if (!IsReady()) {
+    SetErrorCode(ErrorCode::ROUTING_ERROR_NOT_READY, "Navigator is not ready!",
+                 response->mutable_status());
+    return false;
+  }
+  std::vector<const TopoNode*> way_nodes;
+  std::vector<double> way_s;
+  // 通过request的waypoint点，在graph中找到对应的way_nodes和way_s
+  if (!Init(request, graph_.get(), &way_nodes, &way_s)) {
+    SetErrorCode(ErrorCode::ROUTING_ERROR_NOT_READY,
+                 "Failed to initialize navigator!", response->mutable_status());
+    return false;
+  }
+
+  // 2. search routing proposal and search space
+  // std::vector<NodeWithRange> result_nodes;
+  // if (!SearchRouteByStrategy(graph_.get(), way_nodes, way_s, &result_nodes)) {
+  //   SetErrorCode(ErrorCode::ROUTING_ERROR_RESPONSE,
+  //                "Failed to find route with request!",
+  //                response->mutable_status());
+  //   return false;
+  // }
+  std::vector<NodeWithRange> result_nodes;
+  std::vector<std::vector<NodeWithRange>> search_space;
+  if (!SearchRouteAndSearchSpaceByStrategy(
+      graph_.get(), way_nodes, way_s, &result_nodes, &search_space)) {
+    SetErrorCode(ErrorCode::ROUTING_ERROR_RESPONSE,
+                 "Failed to find route with request!",
+                 response->mutable_status());
+    return false;
+  }
+
+  if (result_nodes.empty()) {
+    SetErrorCode(ErrorCode::ROUTING_ERROR_RESPONSE, "Failed to result nodes!",
+                 response->mutable_status());
+    return false;
+  }
+  result_nodes.front().SetStartS(request.waypoint().begin()->s());
+  result_nodes.back().SetEndS(request.waypoint().rbegin()->s());
+
+  // 3. create response
+  // 扩展result_nodes（添加一些并行node），
+  // 以RoadSegment/Passage/LaneSegment的结构重构routing结果，存储在response中
+  // if (!result_generator_->GeneratePassageRegion(
+  //         graph_->MapVersion(), request, result_nodes, topo_range_manager_,
+  //         response)) {
+  //   SetErrorCode(ErrorCode::ROUTING_ERROR_RESPONSE,
+  //                "Failed to generate passage regions based on result lanes",
+  //                response->mutable_status());
+  //   return false;
+  // }
+  if (!result_generator_->GenerateRoutingResponse(
+          graph_->MapVersion(), request, result_nodes, 
+          search_space, topo_range_manager_, response)) {
+    SetErrorCode(ErrorCode::ROUTING_ERROR_RESPONSE,
+                 "Failed to generate passage regions based on result lanes",
+                 response->mutable_status());
+    return false;
+  }
+
+  SetErrorCode(ErrorCode::OK, "Success!", response->mutable_status());
+
+  PrintDebugData(result_nodes);
+  return true;
+}
+
+/***************** search space for behavior planner : end *****************/
+
 // input:
 //    way_nodes, way_s: 通过request在graph找到的
 bool Navigator::SearchRouteByStrategy(

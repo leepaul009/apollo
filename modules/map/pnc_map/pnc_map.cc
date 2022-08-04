@@ -86,6 +86,7 @@ LaneSegment PncMap::ToLaneSegment(const routing::LaneSegment &segment) const {
 }
 
 void PncMap::UpdateNextRoutingWaypointIndex(int cur_index) {
+  // 1. cur_index非法时的处理
   if (cur_index < 0) {
     next_routing_waypoint_index_ = 0;
     return;
@@ -94,6 +95,7 @@ void PncMap::UpdateNextRoutingWaypointIndex(int cur_index) {
     next_routing_waypoint_index_ = routing_waypoint_index_.size() - 1;
     return;
   }
+  // 因为新的routing response传来时，next_routing_waypoint_index_被设置为0，
   // Search backwards when the car is driven backward on the route.
   while (next_routing_waypoint_index_ != 0 &&
          next_routing_waypoint_index_ < routing_waypoint_index_.size() &&
@@ -134,7 +136,8 @@ std::vector<routing::LaneWaypoint> PncMap::FutureRouteWaypoints() const {
       waypoints.begin() + next_routing_waypoint_index_, waypoints.end());
 }
 
-// 更新routing的范围，即range_start_和range_end_
+// 更新routing的范围，即range_start_和range_end_，记录第一个node(最左)到最后一个节点（最右）
+// TODO: range_start_和range_end_的范围是否可能超界？
 void PncMap::UpdateRoutingRange(int adc_index) {
   // Track routing range.
   range_lane_ids_.clear();
@@ -150,6 +153,9 @@ void PncMap::UpdateRoutingRange(int adc_index) {
   }
 }
 
+// 从routing中查找到（离ego状态）最近的道路点adc_waypoint，
+// 根据adc_waypoint来在route_indices_中查找到当前行驶至了routing的哪条LaneSegment上，
+// 并将“LaneSegment的index”赋给adc_route_index_
 bool PncMap::UpdateVehicleState(const VehicleState &vehicle_state) {
   if (!ValidateRouting(routing_)) {
     AERROR << "The routing is invalid when updating vehicle state.";
@@ -211,8 +217,8 @@ bool PncMap::IsNewRouting(const routing::RoutingResponse &prev,
   return !common::util::IsProtoEqual(prev, routing);
 }
 
-// Step 1:
-//  每当有新的routing结果时，该方法会用最新的RoutingResponse对PncMap里的数据进行更新
+/************* Step 1 *************/
+// 每当有新的routing结果时，该方法会用最新的RoutingResponse对PncMap里的数据进行更新
 bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
   range_lane_ids_.clear();
   route_indices_.clear();
@@ -248,9 +254,10 @@ bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
   // route_indices_中的lane_id应该是唯一的
   UpdateRoutingRange(adc_route_index_);
 
-  // 将route_waypoint对应的node信息，waypoint信息 维护在routing_waypoint_index_里
+  // routing_request的waypoint是导航起始、中间、终止点（至少有2个）。
+  // 将waypoint的信息存储在routing_waypoint_index_里。
   routing_waypoint_index_.clear();
-  const auto &request_waypoints = routing.routing_request().waypoint();
+  const auto &request_waypoints = routing.routing_request().waypoint(); // repeated LaneWaypoint
   if (request_waypoints.empty()) {
     AERROR << "Invalid routing: no request waypoints.";
     return false;
@@ -263,7 +270,7 @@ bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
       routing_waypoint_index_.emplace_back(
           LaneWaypoint(route_indices_[j].segment.lane, // hdmap的LaneInfo
                        request_waypoints.Get(i).s()),
-          j); // 将laneSegment序号、lane信息、waypoint结合起来
+          j); // 将waypoint对应的lane信息、s值和laneSegment序号存储在routing_waypoint_index_中。
       ++i;
     }
   }
@@ -411,6 +418,7 @@ std::vector<int> PncMap::GetNeighborPassages(const routing::RoadSegment &road,
     }
   }
 
+  // we only consider neighbor lanes that are inside road(RoadSegment)
   for (int i = 0; i < road.passage_size(); ++i) {
     if (i == start_passage) {
       continue;
@@ -426,7 +434,8 @@ std::vector<int> PncMap::GetNeighborPassages(const routing::RoadSegment &road,
   return result;
 }
 
-// Step 2(main functionality):
+/************* Step 2(main functionality): *************/
+// 
 bool PncMap::GetRouteSegments(const VehicleState &vehicle_state,
                               std::list<RouteSegments> *const route_segments) {
   double look_forward_distance =
@@ -435,6 +444,439 @@ bool PncMap::GetRouteSegments(const VehicleState &vehicle_state,
   return GetRouteSegments(vehicle_state, look_backward_distance,
                           look_forward_distance, route_segments);
 }
+
+
+/************************* for behavior planner:beg *************************/
+std::vector<LaneInfoConstPtr> PncMap::GetSuccessors(
+  LaneInfoConstPtr lane) const {
+
+  std::vector<LaneInfoConstPtr> result;
+  if (lane->lane().successor_id().empty()) {
+    return result;
+  }
+  
+  // hdmap::Id preferred_id = lane->lane().successor_id(0);
+  // return lane_id's type is 'Id', lane_id.id()'s type is 'string'
+  for (const auto &lane_id : lane->lane().successor_id()) {
+    if (all_lane_ids_.count(lane_id.id()) != 0) { 
+      result.push_back(hdmap_->GetLaneById(lane_id));      
+    }
+  }
+  
+  return result;
+}
+
+std::vector<LaneInfoConstPtr> PncMap::GetPredecessors(
+  LaneInfoConstPtr lane) const {
+
+  std::vector<LaneInfoConstPtr> result;
+  if (lane->lane().predecessor_id().empty()) {
+    return result;
+  }
+  for (const auto &lane_id : lane->lane().predecessor_id()) {
+    if (all_lane_ids_.count(lane_id.id()) != 0) {
+      result.push_back(hdmap_->GetLaneById(lane_id));    
+    }
+  }
+  return result;
+}
+
+std::vector<LaneInfoConstPtr> PncMap::GetLeftAndRightNeighbors(
+  LaneInfoConstPtr lane) const {
+  
+  std::vector<LaneInfoConstPtr> result;
+  if (lane->lane().left_neighbor_forward_lane_id().empty() &&
+      lane->lane().right_neighbor_forward_lane_id().empty()) {
+    return result;
+  }
+  for (const auto &lane_id : lane->lane().left_neighbor_forward_lane_id()) { // Id
+    if (all_lane_ids_.count(lane_id.id()) != 0) {
+      result.push_back(hdmap_->GetLaneById(lane_id)); 
+    }
+  }
+  for (const auto &lane_id : lane->lane().right_neighbor_forward_lane_id()) { // Id
+    if (all_lane_ids_.count(lane_id.id()) != 0) {
+      result.push_back(hdmap_->GetLaneById(lane_id)); 
+    }
+  }
+  return result;
+}
+
+bool PncMap::getPossibleSequencesFromLaneSegment(
+  const LaneSegment& lane_segment,
+  const double horizon,
+  const bool is_forward,
+  std::list<RouteSegments>& sequences) {
+  // struct SeqCandidate{
+  //   RouteSegments seq,
+  //   // double s_value;
+  //   double remianing_h; // distance to current node(exclude current node)
+  // };
+  
+  // typedef std::vector<LaneSegment> LaneSequence;
+  std::vector<std::pair<RouteSegments, double>> open_stack;
+
+  // TODO: check input lane_seg is valid
+  // RouteSegments lane_sequence{lane_segment}; 
+  // LaneSegment length might be partial of map_lane_segment
+  double remaining_h = horizon - lane_segment.Length();
+  // TODO: involve eps
+  if (remaining_h <= 0.0) {
+    sequences.emplace_back(RouteSegments{lane_segment}); // TODO: check if ref is ok for init
+    return true;
+  }
+  open_stack.emplace_back(RouteSegments{lane_segment}, remaining_h); // TODO: do not copy
+  
+  while(!open_stack.empty()) {
+    auto curr_sequence = std::move(open_stack.back().first);
+    remaining_h = open_stack.back().second;
+    open_stack.pop_back();
+
+    auto curr_ls = curr_sequence.back();
+    // find out connection
+    auto connections = is_forward ? 
+      GetSuccessors(curr_ls.lane) : GetPredecessors(curr_ls.lane);
+
+    for (auto& cont_lane : connections) {
+      // check if continue lane segment existed in search space
+      if (all_lane_ids_.count(cont_lane->id().id()) == 0) {
+        continue;
+      }
+      // each continous laneSegment maintain its own lane sequence.
+      // copy lane sequence. 
+      RouteSegments next_seq(curr_sequence);
+      // insert a LaneSegment(successor or predecessor) to lane sequence
+      next_seq.emplace_back(cont_lane, 0.0, cont_lane->total_length());
+      // remaining horizon of next_sequence
+      double remaining_next = remaining_h - next_seq.back().Length();
+      // TODO: consider eps
+      if (remaining_next < 0.0) {
+        // curr_sequence has positive remaining horizon,
+        // while next_sequence has negative. stop searching forward/backward.
+        sequences.emplace_back(std::move(next_seq));
+        continue;
+      }
+      open_stack.emplace_back(std::move(next_seq), remaining_next); // TODO: don't copy
+    }
+
+    // can not find connected lane
+    if (connections.size() == 0) {
+      sequence.emplace_back(std::move(curr_sequence)); // TODO: don't copy
+      continue;
+    }
+
+  } // end while
+
+  return true;
+}
+
+bool PncMap::GetRouteSegmentsInSearchSpace(
+  const std::array<int, 3>& ego_route_index,
+  const double horizon,
+  const double backward_extend_horizon,
+  std::list<RouteSegments>& lane_sequences) {
+
+  struct LaneNode{
+    LaneInfoConstPtr lane_ptr;
+    double s_value;
+    double distance_from_ego; // only consider distance from ego to previous node
+    bool is_root;
+  };
+
+  std::map<std::string, LaneNode> visited_nodes;
+  std::vector<LaneNode> open_stack;
+
+  // const auto& ego_road = routing_.road(ego_route_index[0]);
+  // double ratio = adc_waypoint_.s / adc_waypoint_.lane->total_length();
+  // TODO: check ratio is valid
+  // for (int i=0; i<ego_road.passage_size(); ++i) {
+  //   const auto& p = ego_road.passage(i);
+  //   // TODO: find corner case
+  //   // get ego projected lane segment. 
+  //   const auto& lane = p.segment(ego_route_index[2]);
+  //   auto lane_ptr - hdmap_->GetLaneById( hdmap::MakeMapId(lane.id()) );
+  //   if (!lane_ptr) {
+  //     AERROR << "Failed to find lane: " << lane.id();
+  //     return false;
+  //   }
+  //   // open_list.insert(lane_ptr);
+  //   // adc_waypoint_.lane/s
+  //   double s_value = 0.0;
+  //   if (lane_ptr == adc_waypoint_.lane) {
+  //     s_value = adc_waypoint_.s;
+  //   } else {
+  //     s_value = ratio * lane_ptr->total_length();  
+  //   }
+  //   // double s_from_ego = lane_ptr->total_length() - s_value;
+  //   // TODO: check if s_value and s_from_ego valid
+  //   auto node = LaneNode{lane_ptr, s_value, 0.0, true};
+  //   open_stack.push_back(node);
+  // }
+
+  // get ego located lane segment as first node
+  // check if adc_waypoint_ is valid
+  open_stack.push_back(LaneNode{adc_waypoint_.lane, adc_waypoint_.s, 0.0, ture});
+
+  // visit each node inside graph
+  while(!open_stack.empty()) {
+    auto curr_node = open_stack.back();
+    open_stack.pop_back();
+
+    auto lane_id = curr_node.lane_ptr->id().id(); // std::string
+    // visited_nodes
+    auto visited_it = visited_nodes.find(lane_id);
+    if (visited_it != visited_nodes.end()){
+      // update is_root if current node is already visited
+      auto& n = visited_it->second;
+      n.is_root = n.is_root && curr_node.is_root;
+      continue;
+    }
+    // insert
+    visited_nodes.insert(std::make_pair(lane_id, curr_node));
+
+    // get out connection
+    for (auto& neighbor : GetLeftAndRightNeighbors(curr_node.lane_ptr)) {
+      // curr_node.s_value, curr_node.distance_from_ego
+      double s = curr_node.s_value;
+      // TODO: check if s is valid for current neighbor-laneSegment
+      double s_from_ego = curr_node.distance_from_ego; // - curr_node.lane_ptr->total_length() + neighbor.lane_ptr->total_length();
+      open_stack.push_back(LaneNode{neighbor, s, s_from_ego, true});
+    }
+    // check if remainning horizon is valid
+    // curr_node's distance_from_ego(exclude curr_node) + {curr_node's length - s_value}(remaining length of curr_node)
+    double distance_from_ego_to_cur_lane_segment = curr_node.distance_from_ego + curr_node.lane_ptr->total_length() - curr_node.s_value;
+    if (distance_from_ego_to_cur_lane_segment >= horizon) {
+      continue;
+    }
+    for (auto& successor : GetSuccessors(curr_node.lane_ptr)) {
+      double s = curr_node.distance_from_ego + successor->total_length();
+      // TODO: check if successor length valid
+      open_stack.push_back(LaneNode{successor, 0, distance_from_ego_to_cur_lane_segment, false});
+    }
+
+  }
+  auto is_root_node = [](std::map<std::string, LaneNode>::iterator it){ 
+    return it->second.is_root;
+  };
+  // int num_roots = std::count_if(visited_nodes.cbegin(), visited_nodes.cend(), is_root_node);
+  // std::vector<LaneNode> roots(num_roots);
+  // std::copy_if(visited_nodes.cbegin(), visited_nodes.cend(), roots.begin(), is_root_node);
+  std::vector<LaneNode> roots;
+  std::copy_if(visited_nodes.cbegin(), visited_nodes.cend(), 
+               std::back_inserter(roots), 
+               is_root_node);
+
+  // search lane sequence 
+  for (const auto& root : roots) {
+    // search lane sequence from root
+    auto ls = LaneSegment(root.lane_ptr, root.s_value, root.lane_ptr->total_length());
+    auto remaining_h = horizon - root.distance_from_ego;
+    std::list<RouteSegments> seqs;
+    if (!getPossibleSequencesFromLaneSegment(
+      ls, remaining_h, true, seqs)) {
+      // error
+    }
+    if (seqs.empty()) {
+      // error or not?
+      continue;
+    }
+    // search lane_segment(not in search space) backward, extend seqs
+    ExtendLaneSequencesForLaneMerge(backward_extend_horizon, seqs);
+    // merge list_sequence to final list_sequence.
+    lane_sequences.insert(lane_sequences.end(), seqs.begin(), seqs.end());
+    // TODO: check if successful
+  }
+
+  return true;
+}
+
+bool PncMap::ExtendLaneSequencesForLaneMerge(
+  const double horizon, // TODO: current not use
+  std::list<RouteSegments>& sequences) {
+
+  if (sequences.empty()) {
+    return true;
+  }
+  std::list<RouteSegments> additional_seqs;
+  for (const auto& sequence : sequences) {
+    // ignore the first lane segment
+    if (sequence.size() <= 1) {
+      continue;
+    }
+    // as we ignore first lane segment, the second and forward lane segment
+    // is not partial lane segment(where start_s!=0, end_s!=lane_seg_length)
+    for (const auto& it = sequence.begin()+1; it != sequence.end(); ++it) {
+      auto predecessors = GetPredecessors(it->lane);      
+      // create a new sequence for right predecessor.
+      for (const auto& p : predecessors) {
+        // TODO: if we should check nullptr?
+        if (all_lane_ids_.count(p->id().id()) > 0) {
+          continue;
+        }
+        // find predecessor not in search space.
+        additional_seqs.emplace_back();
+        auto& seq = additional_seqs.back(); // RouteSegments
+        seq.emplace_back(p, 0.0, p->total_length());
+        seq.insert(seq.end(), it, sequence.end());
+      }
+      // TODO: find corner case (error case)
+    }
+  }
+  // merge with additional sequence
+  if (!additional_seqs.empty()) {
+    sequences.insert(sequences.end(), 
+                     additional_seqs.begin(), 
+                     additional_seqs.end());
+  }
+  return true;
+}
+
+// RouteSegments 继承自 vector<LaneSegment>
+bool PncMap::GetRouteSegmentsInHorizon(const VehicleState &vehicle_state,
+                              const double backward_length,
+                              const double forward_length,
+                              std::list<RouteSegments> *const route_segments_candidates) {
+  // 1.
+  // 从routing中查找（距离ego最近的）道路点作为adc_waypoint，
+  // 根据adc_waypoint的LaneSegment信息，在route_indices_中找匹配（ego驶至routing的哪条LaneSegment上），
+  // 并将“LaneSegment的index”赋给adc_route_index_
+  if (!UpdateVehicleState(vehicle_state)) {
+    AERROR << "Failed to update vehicle state in pnc_map.";
+    return false;
+  }
+  // Vehicle has to be this close to lane center before considering change
+  // lane
+  if (!adc_waypoint_.lane || adc_route_index_ < 0 ||
+      adc_route_index_ >= static_cast<int>(route_indices_.size())) {
+    AERROR << "Invalid vehicle state in pnc_map, update vehicle state first.";
+    return false;
+  }
+
+  // 2. 已经得到ego位置对应的route_index，
+  // 根据这个route_index寻找road和passage，在以此找到这个passage的“邻居”
+  const auto &route_index = route_indices_[adc_route_index_].index; // return std::array<int, 3>
+  const int road_index = route_index[0]; // RoadSegment
+  const int passage_index = route_index[1]; // RoadSegment's Passage
+  const auto &road = routing_.road(road_index);
+  // Raw filter to find all neighboring passages
+  // passage的邻居（变道关系的邻居，并且属于当前road）
+  // auto drive_passages = GetNeighborPassages(road, passage_index);
+  // Get all possible lane sequences within horizon(forward_length).
+  double backward_extend_horizon = 50.0;
+  std::list<RouteSegments> drive_passages;
+  GetRouteSegmentsInSearchSpace(route_index, 
+                                forward_length, 
+                                backward_extend_horizon, 
+                                drive_passages);
+  // 3.
+  // 一个passage对应一个route_segments(segments belong to this passage)
+  // 因为drive_passages只考虑“变道邻居”，没有考虑“forward邻居”，
+  // TODO: find all passages included in search space and certain horizon(for/backward)
+  int index = -1;
+  for (auto& segments : drive_passages) {
+    ++index;
+  // for (const int index : drive_passages) {
+    // const auto &passage = road.passage(index);
+    // RouteSegments segments;
+    // RouteSegments lane_seq{segments}; // copy
+    // RouteSegments就是将Passage中LaneSegments，存进其数组里，并记录起始终止的s值
+    // if (!PassageToSegments(passage, &segments)) {
+    //   ADEBUG << "Failed to convert passage to lane segments.";
+    //   continue;
+    // }
+
+    // 3.1 check validance
+    // TODO: mark if route segment can be driven or not. For route segment that
+    // can not be driven, it is noly used for agent association.
+    // const PointENU nearest_point =
+    //     index == passage_index
+    //         ? adc_waypoint_.lane->GetSmoothPoint(adc_waypoint_.s)
+    //         : PointFactory::ToPointENU(adc_state_);
+    bool is_ego_on_segments = (segments.at(0).lane == adc_waypoint_.lane);
+    const PointENU nearest_point = 
+      is_ego_on_segments
+        ? adc_waypoint_.lane->GetSmoothPoint(adc_waypoint_.s)
+        : PointFactory::ToPointENU(adc_state_);
+    
+    // sl定义了相对于segments的点(位置)，segment_waypoint定义相对于lane的点(位置)
+    // TODO: if we can not interpolate nearest_point on segments
+    // (extrapolate also means fail to interpolate), the projection fails.
+    // In this case, we reset sl point with {0, 0}.
+    common::SLPoint sl;
+    LaneWaypoint segment_waypoint; // not use
+    if (!segments.GetProjection(nearest_point, &sl, &segment_waypoint)) {
+      ADEBUG << "Failed to get projection from point: "
+             << nearest_point.ShortDebugString();
+      // continue;
+      // TODO: if it works with set s=0 and l=0 
+      sl.set_s(0.0);
+      sl.set_l(0.0);
+    }
+    // TODO: remove this logic as ego can drive onto these passage 
+    //       with long-term behavior.
+    
+    // if (index != passage_index) {
+    // if (!is_ego_on_segments) {
+    //   if (!segments.CanDriveFrom(adc_waypoint_)) {
+    //     ADEBUG << "You cannot drive from current waypoint to passage: "
+    //            << index;
+    //     continue;
+    //   }
+    // }
+
+    // 3.2 extend segments
+    // 新建、扩展route_segments（route_segments is passage that contains LaneSegment, or topoNode）
+    // 这里的segments的扩展，可以包括一些不在routing范围内的LaneSegment
+    // TODO: 不在routing范围内的“扩展”存在一些问题，例如：前方分叉的laneSegment
+    // TODO: 解决因“范围问题”导致的extend失败的case: 
+    //    1) 对于在ego前方的lane_seq，不要backward扩张太多 -> 重写extend's start_s
+    //    2) 
+    route_segments_candidates->emplace_back();
+    auto& route_segments = route_segments_candidates->back();
+    const auto last_waypoint = segments.LastWaypoint();
+    if (!ExtendSegments(segments,
+                        sl.s() - backward_length,
+                        sl.s() + forward_length, 
+                        &route_segments)) {
+      AERROR << "Failed to extend segments with s=" << sl.s()
+             << ", backward: " << backward_length
+             << ", forward: " << forward_length;
+      return false;
+    }
+
+    // 3.3 store information
+    // 扩展前的segments的最末点 是否在扩展后的segments上面
+    if (route_segments.IsWaypointOnSegment(last_waypoint)) {
+      route_segments.SetRouteEndWaypoint(last_waypoint);
+    }
+    
+    // TODO: 需淘汰的性质：CanExit, NextAction
+    route_segments.SetCanExit(segments.can_exit());
+    route_segments.SetNextAction(segments.change_lane_type());
+
+    const std::string route_segment_id = absl::StrCat(road_index, "_", index);
+    route_segments.SetId(route_segment_id);
+    route_segments.SetStopForDestination(stop_for_destination_);
+
+    // if (index == passage_index) {
+    // TODO: 需淘汰的性质：PreviousAction: 暂时全改成forward
+    if (is_ego_on_segments) {
+      route_segments.SetIsOnSegment(true);
+      route_segments.SetPreviousAction(routing::FORWARD);
+    } else {
+      route_segments.SetPreviousAction(routing::FORWARD);
+    }
+    // else if (sl.l() > 0) {
+    //   route_segments.SetPreviousAction(routing::RIGHT);
+    // } else {
+    //   route_segments.SetPreviousAction(routing::LEFT);
+    // }
+  }
+  return !route_segments_candidates->empty();
+}
+
+/************************* for behavior planner:end *************************/
+
 
 // RouteSegments 继承自 vector<LaneSegment>
 // extract segments from routing
@@ -458,17 +900,19 @@ bool PncMap::GetRouteSegments(const VehicleState &vehicle_state,
     return false;
   }
 
-  // 2. 已经得到ego位置对应的route_index，根据这个route_index寻找“邻居”
+  // 2. 已经得到ego位置对应的route_index，
+  // 根据这个route_index寻找road和passage，在以此找到这个passage的“邻居”
   const auto &route_index = route_indices_[adc_route_index_].index;
   const int road_index = route_index[0]; // RoadSegment
   const int passage_index = route_index[1]; // RoadSegment's Passage
   const auto &road = routing_.road(road_index);
   // Raw filter to find all neighboring passages
-  // passage的邻居
+  // passage的邻居（变道关系的邻居，并且属于当前road）
   auto drive_passages = GetNeighborPassages(road, passage_index);
 
   // 3.
   // 一个passage对应一个route_segments(segments belong to this passage)
+  // 因为drive_passages只考虑“变道邻居”，没有考虑“forward邻居”，
   for (const int index : drive_passages) {
     const auto &passage = road.passage(index);
     RouteSegments segments;
@@ -485,6 +929,7 @@ bool PncMap::GetRouteSegments(const VehicleState &vehicle_state,
             : PointFactory::ToPointENU(adc_state_);
     common::SLPoint sl;
     LaneWaypoint segment_waypoint;
+    // sl定义了相对于segments的点(位置)，segment_waypoint定义了相对于lane的点(位置)
     if (!segments.GetProjection(nearest_point, &sl, &segment_waypoint)) {
       ADEBUG << "Failed to get projection from point: "
              << nearest_point.ShortDebugString();
@@ -499,7 +944,9 @@ bool PncMap::GetRouteSegments(const VehicleState &vehicle_state,
     }
 
     // 3.2 extend segments
-    // 新建一个lane_segments，插入route_segments
+    // 新建、扩展route_segments（route_segments is passage that contains LaneSegment, or topoNode）
+    // 这里的segments的扩展，可以包括一些不在routing范围内的LaneSegment
+    // TODO: 不在routing范围内的“扩展”存在一些问题，例如：前方分叉的laneSegment
     route_segments->emplace_back();
     const auto last_waypoint = segments.LastWaypoint();
     if (!ExtendSegments(segments, sl.s() - backward_length,
@@ -539,6 +986,8 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
   waypoint->lane = nullptr;
   std::vector<LaneInfoConstPtr> lanes;
   const auto point = PointFactory::ToPointENU(state);
+  // 这里，apollo用distance和heading来筛选符合要求的lane，
+  // TODO: 但是，我们可以事先组织lane，预先计算point(ego位置)和lane的association，以此找到关联的lane
   const int status =
       hdmap_->GetLanesWithHeading(point, kMaxDistance, state.heading(),
                                   M_PI / 2.0 + kHeadingBuffer, &lanes);
@@ -552,6 +1001,8 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
            << " meters with heading " << state.heading();
     return false;
   }
+
+  // 筛选合法的lane（合法的lane或者存在于range_lane_ids_，或者存在于all_lane_ids_）
   std::vector<LaneInfoConstPtr> valid_lanes;
   std::copy_if(lanes.begin(), lanes.end(), std::back_inserter(valid_lanes),
                [&](LaneInfoConstPtr ptr) {
@@ -586,6 +1037,7 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
     double distance = 0.0;
     common::PointENU map_point =
         lane->GetNearestPoint({point.x(), point.y()}, &distance);
+    // 选择一个离ego point最近的lane，以此生成waypoint
     if (distance < min_distance) {
       min_distance = distance;
       double s = 0.0;
@@ -606,6 +1058,7 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
   return waypoint->lane != nullptr;
 }
 
+// GetRouteSuccessor和GetRoutePredecessor优先选择“在routing内的”后继、前驱LaneInfo
 LaneInfoConstPtr PncMap::GetRouteSuccessor(LaneInfoConstPtr lane) const {
   if (lane->lane().successor_id().empty()) {
     return nullptr;
@@ -641,6 +1094,7 @@ LaneInfoConstPtr PncMap::GetRoutePredecessor(LaneInfoConstPtr lane) const {
   return hdmap_->GetLaneById(preferred_id);
 }
 
+
 bool PncMap::ExtendSegments(const RouteSegments &segments,
                             const common::PointENU &point, double look_backward,
                             double look_forward,
@@ -655,6 +1109,7 @@ bool PncMap::ExtendSegments(const RouteSegments &segments,
                         extended_segments);
 }
 
+// 参数start_s、end_s指相对于segments上的位置
 bool PncMap::ExtendSegments(const RouteSegments &segments,
                             double start_s,
                             double end_s,
@@ -671,18 +1126,22 @@ bool PncMap::ExtendSegments(const RouteSegments &segments,
     AERROR << "start_s(" << start_s << " >= end_s(" << end_s << ")";
     return false;
   }
+  // record all unique MapLaneSegment of RouteSegments
   std::unordered_set<std::string> unique_lanes;
   static constexpr double kRouteEpsilon = 1e-3;
   // Extend the trajectory towards the start of the trajectory.
-  // 当start_s为负数时，需要扩展到当前lane的前一条lane，然后在unique_lanes里存下这个新lane
+  // 当start_s为负数时，需要扩展到当前laneInfo的前一条laneInfo(可能不在routing内)
   if (start_s < 0) {
     const auto &first_segment = *segments.begin();
     auto lane = first_segment.lane;
+    // extend_s is the length we need to extend backward
+    // s is the remainning length we can extend backward on current MapLaneSegment
     double s = first_segment.start_s;
     double extend_s = -start_s;
     std::vector<LaneSegment> extended_lane_segments;
     while (extend_s > kRouteEpsilon) {
       if (s <= kRouteEpsilon) {
+        // 有可能找到“不在routing内的”laneInfo
         lane = GetRoutePredecessor(lane);
         if (lane == nullptr ||
             unique_lanes.find(lane->id().id()) != unique_lanes.end()) {
@@ -690,6 +1149,7 @@ bool PncMap::ExtendSegments(const RouteSegments &segments,
         }
         s = lane->total_length();
       } else {
+        // "length" is the length we can extend on "lane"
         const double length = std::min(s, extend_s);
         extended_lane_segments.emplace_back(lane, s - length, s);
         extend_s -= length;
@@ -701,33 +1161,47 @@ bool PncMap::ExtendSegments(const RouteSegments &segments,
                                extended_lane_segments.rbegin(),
                                extended_lane_segments.rend());
   }
+  
   bool found_loop = false;
   double router_s = 0;
-  for (const auto &lane_segment : segments) {
+  // visit all LaneSegment of (const)RouteSegments
+  for (const auto &lane_segment : segments) 
+  {
+    // router_s: accumulated length of all lane_segments visited previously
+    // start_s(或end_s) - router_s: 表示start_s(或end_s)在当前LS的坐标，
+    // + lane_segment.start_s: 表示把“当前LS的坐标”转成“当前MapLS的坐标”，
+    // 因为lane_segment.start_s、end_s表示的就是“当前MapLS的坐标”，这样比较才有意义。
     const double adjusted_start_s = std::max(
         start_s - router_s + lane_segment.start_s, lane_segment.start_s);
     const double adjusted_end_s =
         std::min(end_s - router_s + lane_segment.start_s, lane_segment.end_s);
-    if (adjusted_start_s < adjusted_end_s) {
+    
+    if (adjusted_start_s < adjusted_end_s) 
+    {
+      // merge current LaneSegment with previous if two belong to same MapLS 
       if (!truncated_segments->empty() &&
-          truncated_segments->back().lane->id().id() ==
-              lane_segment.lane->id().id()) {
+          truncated_segments->back().lane->id().id() == lane_segment.lane->id().id()) 
+      {
         truncated_segments->back().end_s = adjusted_end_s;
-      } else if (unique_lanes.find(lane_segment.lane->id().id()) ==
-                 unique_lanes.end()) {
+      }
+      else if (unique_lanes.find(lane_segment.lane->id().id()) == unique_lanes.end()) 
+      {
         truncated_segments->emplace_back(lane_segment.lane, adjusted_start_s,
                                          adjusted_end_s);
         unique_lanes.insert(lane_segment.lane->id().id());
-      } else {
+      }
+      else
+      {
         found_loop = true;
         break;
       }
     }
+    // router_s上累加当前LaneSegment的长度（可能是partial长度）。
     router_s += (lane_segment.end_s - lane_segment.start_s);
     if (router_s > end_s) {
       break;
     }
-  }
+  } // end for loop to LaneSegment
   if (found_loop) {
     return true;
   }
@@ -743,7 +1217,7 @@ bool PncMap::ExtendSegments(const RouteSegments &segments,
     }
   }
   auto last_lane = segments.back().lane;
-  // 如果end_s非常大，超过了当前的lane，则扩展到下一条lane
+  // 如果end_s大于当前LaneSegments的总长，则向后扩展
   while (router_s < end_s - kRouteEpsilon) {
     last_lane = GetRouteSuccessor(last_lane);
     if (last_lane == nullptr ||

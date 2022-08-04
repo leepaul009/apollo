@@ -34,6 +34,29 @@ class AStarStrategy : public Strategy {
                       const TopoNode* src_node, const TopoNode* dest_node,
                       std::vector<NodeWithRange>* const result_nodes);
 
+/***************** search space for behavior planner:beg *****************/
+  int isNodeInRoute(
+    const TopoNode* node,
+    const size_t start_route_idx,
+    const std::vector<std::string>& road_ids_in_route,
+    const bool is_forward);
+
+  bool GetSearchSpace(
+    const TopoNode* src_node,
+    const TopoNode* dest_node,
+    const SubTopoGraph* sub_graph,
+    const std::vector<NodeWithRange>& result_nodes,
+    std::unordered_set<const TopoNode*>& search_space_nodes,
+    std::unordered_set<const TopoEdge*>& search_space_edges);
+
+  bool GetParallelSearchSpace(
+    const TopoNode* src_node, 
+    const TopoNode* dest_node, 
+    const SubTopoGraph* sub_graph,
+    const std::vector<NodeWithRange>& result_nodes,
+    std::vector<std::vector<NodeWithRange>>& search_space);
+/***************** search space for behavior planner:end *****************/
+
  private:
   void Clear();
   double HeuristicCost(const TopoNode* src_node, const TopoNode* dest_node);

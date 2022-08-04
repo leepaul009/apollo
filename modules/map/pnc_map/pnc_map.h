@@ -65,6 +65,40 @@ class PncMap {
   bool GetRouteSegments(const common::VehicleState &vehicle_state,
                         std::list<RouteSegments> *const route_segments);
 
+/************************* for behavior planner:beg *************************/
+
+  std::vector<LaneInfoConstPtr> GetSuccessors(LaneInfoConstPtr lane);
+  std::vector<LaneInfoConstPtr> GetPredecessors(LaneInfoConstPtr lane);
+  std::vector<LaneInfoConstPtr> GetLeftAndRightNeighbors(LaneInfoConstPtr lane);
+
+  /**
+   * @brief Form a given lane segment, it search all possible continous lane sequence
+   * within horizon. Both forward and backward search is possible.
+   */
+  bool getPossibleSequencesFromLaneSegment(
+    const LaneSegment& lane_segment,
+    const double horizon,
+    const bool is_forward,
+    std::list<RouteSegments>& sequences);
+
+  bool GetRouteSegmentsInSearchSpace(
+    const std::array<int, 3>& ego_route_index,
+    const double horizon,
+    const double backward_extend_horizon,
+    std::list<RouteSegments>& lane_sequences);
+
+  bool ExtendLaneSequencesForLaneMerge(
+    const double horizon, // TODO: current not use
+    std::list<RouteSegments>& sequences);
+  
+  bool GetRouteSegmentsInHorizon(
+    const VehicleState &vehicle_state,
+    const double backward_length,
+    const double forward_length,
+    std::list<RouteSegments> *const route_segments_candidates);
+
+/************************* for behavior planner:end *************************/
+
   /**
    * Check if the routing is the same as existing one in PncMap
    */
@@ -163,7 +197,10 @@ class PncMap {
     LaneSegment segment; // 定义于path.h, 仅和routing.proto中的LaneSegment类似
     std::array<int, 3> index; // routing内的road_index, passage_index, lane_index
   };
+
+  // 当收到新的routing::RoutingResponse时，route_indices_会被更新
   std::vector<RouteIndex> route_indices_;
+  // 当请求pnc_map计算新的RouteSegments时，会更新range_lane_ids_、range_start_、range_end_
   int range_start_ = 0;
   int range_end_ = 0;
   // routing ids in range

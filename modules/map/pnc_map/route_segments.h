@@ -203,6 +203,7 @@ class RouteSegments : public std::vector<LaneSegment> {
   static double Length(const RouteSegments &segments);
 
  private:
+  // 没被扩展的route segments的最末点
   LaneWaypoint route_end_waypoint_;
 
   /**

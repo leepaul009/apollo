@@ -39,6 +39,16 @@ class ResultGenerator {
                              const TopoRangeManager& range_manager,
                              RoutingResponse* const result);
 
+/***************** search space for behavior planner:beg *****************/
+  bool GenerateRoutingResponse(
+    const std::string& map_version, 
+    const RoutingRequest& request,
+    const std::vector<NodeWithRange>& nodes,
+    const std::vector<std::vector<NodeWithRange>>& search_space,
+    const TopoRangeManager& range_manager, 
+    RoutingResponse* const result);
+/***************** search space for behavior planner:end *****************/
+
  private:
   struct PassageInfo {
     std::vector<NodeWithRange> nodes;
@@ -76,6 +86,19 @@ class ResultGenerator {
   bool IsReachableToWithChangeLane(const TopoNode* from_node,
                                    const PassageInfo& to_nodes,
                                    NodeWithRange* reachable_node);
+  
+  /***************** search space for behavior planner:beg *****************/
+  bool ExtractBasicRoadSegments(
+    const std::vector<NodeWithRange>& nodes,
+    const std::vector<std::vector<NodeWithRange>>& search_space,
+    std::vector<std::vector<PassageInfo>>* const road_segments);
+
+  bool FillRoutingResponse(
+    const std::vector<std::vector<PassageInfo>>& road_segments,
+    RoutingResponse* const result);
+  /***************** search space for behavior planner:end *****************/
+
+
 };
 
 }  // namespace routing

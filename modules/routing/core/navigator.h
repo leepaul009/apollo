@@ -36,6 +36,11 @@ class Navigator {
   bool SearchRoute(const RoutingRequest& request,
                    RoutingResponse* const response);
 
+/***************** search space for behavior planner:beg *****************/
+  bool SearchRouteAndSearchSpace(const RoutingRequest& request,
+                            RoutingResponse* const response);
+/***************** search space for behavior planner:end *****************/
+
  private:
   bool Init(const RoutingRequest& request, const TopoGraph* graph,
             std::vector<const TopoNode*>* const way_nodes,
@@ -47,6 +52,15 @@ class Navigator {
       const TopoGraph* graph, const std::vector<const TopoNode*>& way_nodes,
       const std::vector<double>& way_s,
       std::vector<NodeWithRange>* const result_nodes) const;
+
+/***************** search space for behavior planner:beg *****************/
+  bool SearchRouteAndSearchSpaceByStrategy(
+    const TopoGraph* graph, 
+    const std::vector<const TopoNode*>& way_nodes,
+    const std::vector<double>& way_s,
+    std::vector<NodeWithRange>* const result_nodes,
+    std::vector<std::vector<NodeWithRange>>* const search_space) const;
+/***************** search space for behavior planner:end *****************/
 
   bool MergeRoute(const std::vector<NodeWithRange>& node_vec,
                   std::vector<NodeWithRange>* const result_node_vec) const;

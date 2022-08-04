@@ -46,6 +46,137 @@ const NodeWithRange& GetLargestRange(
   return node_vec[result_idx];
 }
 
+/***************** search space for behavior planner:beg *****************/
+// generate final routing response
+bool ResultGenerator::GenerateRoutingResponse(
+    const std::string& map_version, 
+    const RoutingRequest& request,
+    const std::vector<NodeWithRange>& nodes,
+    // const std::unordered_set<const TopoNode*>& search_space_nodes,
+    // const std::unordered_set<const TopoEdge*>& search_space_edges,
+    // const std::vector<std::vector<const TopoNode*>>& search_space,
+    const std::vector<std::vector<NodeWithRange>>& search_space,
+    const TopoRangeManager& range_manager, 
+    RoutingResponse* const result) {
+  
+  // extract RoadSegment
+  std::vector<std::vector<PassageInfo>> road_segments;
+  if (!ExtractBasicRoadSegments(nodes, search_space, &road_segments)){
+    return false;
+  }
+
+  if (!FillRoutingResponse(road_segments, result)){
+    return false;
+  }
+
+  result->set_map_version(map_version);
+  result->mutable_measurement()->set_distance(CalculateDistance(nodes));
+  result->mutable_routing_request()->CopyFrom(request);
+  return true;
+}
+
+// RoadSegment
+bool ResultGenerator::ExtractBasicRoadSegments(
+  const std::vector<NodeWithRange>& nodes,
+  const std::vector<std::vector<NodeWithRange>>& search_space,
+  std::vector<std::vector<PassageInfo>>* const road_segments){
+
+  road_segments->clear();
+  std::vector<std::vector<std::vector<NodeWithRange>>> roads; // temp container
+
+  // for high-way case without blacklist,
+  // only first and last block has partial range, 
+  // while other block should have full range.
+
+  std::vector<std::vector<NodeWithRange>> blocks;
+  blocks.push_back(search_space[0]);
+
+  for (size_t i = 1; i < search_space.size(); ++i){
+    const auto& prev_block = search_space[i-1];
+    const auto& curr_block = search_space[i];
+
+    // compare curr_block with prev_block
+    // a) size equal, 1-1 connected(with suc relation):
+    bool match_prev = false;
+    if (prev_block.size() == curr_block.size()){
+      bool is_connected = false;
+      for (size_t j = 0; j < prev_block.size(); ++j){
+        const auto* prev_node = prev_block[j].GetTopoNode();
+        const auto* curr_node = curr_block[j].GetTopoNode();
+        
+        is_connected = false;
+        const auto& suc_edges = prev_node->OutToSucEdge();
+        if (const auto* e : suc_edges){
+          if (e->ToNode() == curr_node){
+            is_connected = true;
+            break;
+          }
+        }
+        // if prev_node isn't connected(suc) to curr_node 
+        if (!is_connected){
+          break;
+        }
+      }
+      match_prev = is_connected;
+    }
+    // if current block match prev then merge them into same road segment. 
+    // otherwise, current block belong to a new road segment.
+    if (match_prev) {
+      blocks.push_back(curr_block);
+    } else {
+      roads.push_back(blocks);
+      blocks.clear();
+      blocks.push_back(curr_block);
+    }
+  }
+  // proccess final road segment
+  roads.push_back(blocks);
+
+  // re-orgnize each road segment
+  for (const auto& road : roads){
+    // get first_block and size from road;
+    // size is passage size, create passage(PassageInfo): corresp nodes -> passage
+    // create passages as road segment, and insert it into road_segments
+    
+    std::vector<PassageInfo> passages;
+    size_t num_passages = road[0].size();
+    for (size_t i = 0; i < num_passages; ++i) {
+      std::vector<NodeWithRange> nodes_of_passage;
+      for (const auto& block : road) {
+        // block[i] is NodeWithRange
+        nodes_of_passage.push_back(block[i]);
+      }
+      // auto change_lane_type = LEFT;
+      passages.emplace_back(nodes_of_passage, FORWARD);
+    }
+    road_segments->push_back(std::move(passages));
+  }
+  return true;
+}
+
+
+bool ResultGenerator::FillRoutingResponse(
+  const std::vector<std::vector<PassageInfo>>& road_segments,
+  RoutingResponse* const result){
+  
+  for (const auto& passages : road_segments){
+    auto* road = result->add_road();
+    const auto& road_id = passages[0].nodes[0].RoadId();
+    road->set_id(road_id);
+
+    for (const auto& passage : passages) {
+      auto* passage = road->add_passage();
+      LaneNodesToPassageRegion(
+        passage.nodes.cbegin(), passage.nodes.cend(), passage);
+      passage->set_change_lane_type(FORWARD);
+      passage->set_can_exit(true);
+    }
+  }
+  reutrn true;
+}
+
+/***************** search space for behavior planner:end *****************/
+
 // 对于passage内的节点，他们之间的edge都是forward关系，
 // 前一个passage的最后节点，和后一个passage的首个节点，他们之间是变道关系
 bool ResultGenerator::ExtractBasicPassages(
@@ -53,8 +184,10 @@ bool ResultGenerator::ExtractBasicPassages(
     std::vector<PassageInfo>* const passages) {
   ACHECK(!nodes.empty());
   passages->clear();
+
   std::vector<NodeWithRange> nodes_of_passage;
   nodes_of_passage.push_back(nodes.at(0));
+
   for (size_t i = 1; i < nodes.size(); ++i) 
   {
     // 得到节点i-1到节点i的边
@@ -65,8 +198,8 @@ bool ResultGenerator::ExtractBasicPassages(
              << " to " << nodes.at(i).LaneId();
       return false;
     }
-    // 如果节点i-1到节点i的边 是变道，
-    // 则保存当前passage，标记“它到下一个passage的关系”是左或右变道
+    // 如果节点i-1到节点i的边 是“变道”，则点i-1为止的节点为一个passage，节点i为下一个passage的开始节点
+    // 保存当前passage，标记“它到下一个passage的关系”是左或右变道
     if (edge->Type() == TET_LEFT || edge->Type() == TET_RIGHT) {
       auto change_lane_type = LEFT;
       if (edge->Type() == TET_RIGHT) {
@@ -180,7 +313,7 @@ void ResultGenerator::ExtendForward(const TopoRangeManager& range_manager,
     node_set_of_curr_passage.insert(node.GetTopoNode());
   }
 
-  // 如果back_node是次节点，则更新它的endS
+  // 1. 如果back_node是次节点，则更新它的endS
   auto& back_node = curr_passage->nodes.back();
   if (!IsCloseEnough(back_node.EndS(), back_node.FullLength())) { // 说明back_node是次节点
     if (!range_manager.Find(back_node.GetTopoNode())) { // 次节点不可能在range_manager里（只存储起止节点和black_listed节点）
@@ -204,13 +337,14 @@ void ResultGenerator::ExtendForward(const TopoRangeManager& range_manager,
     }
   }
 
-  // 扩展curr_passage
+  // 2. 扩展curr_passage
   bool allowed_to_explore = true;
   while (allowed_to_explore) {
     std::vector<NodeWithRange> succ_set;
-    // 访问curr_passage的末尾节点 的后继节点
+    // 访问curr_passage的末尾节点 的后继节点(往往只有一个)
     for (const auto& edge :
-         curr_passage->nodes.back().GetTopoNode()->OutToSucEdge()) {
+         curr_passage->nodes.back().GetTopoNode()->OutToSucEdge()) 
+    {
       const auto& succ_node = edge->ToNode();
       // if succ node has been inserted
       // 已经被扩展的后继节点 需要被忽略
@@ -257,11 +391,11 @@ void ResultGenerator::ExtendPassages(const TopoRangeManager& range_manager,
                                      std::vector<PassageInfo>* const passages) {
   int passage_num = static_cast<int>(passages->size());
   for (int i = 0; i < passage_num; ++i) {
-    // passage不是最后一个
+    // passage is not last, update(extend) it with next_passage
     if (i < passage_num - 1) {
       ExtendForward(range_manager, passages->at(i + 1), &(passages->at(i)));
     }
-    // passage不是第一个
+    // passage is not first, update(extend) it with prev_passage
     if (i > 0) {
       ExtendBackward(range_manager, passages->at(i - 1), &(passages->at(i)));
     }
@@ -283,7 +417,7 @@ void LaneNodesToPassageRegion(
     const std::vector<NodeWithRange>::const_iterator end,
     Passage* const passage) {
   for (auto it = begin; it != end; ++it) {
-    LaneSegment* seg = passage->add_segment();
+    LaneSegment* seg = passage->add_segment(); // LaneSegment定义在proto中
     seg->set_id(it->LaneId());
     seg->set_start_s(it->StartS());
     seg->set_end_s(it->EndS());
@@ -320,10 +454,13 @@ void PrintDebugInfo(const std::string& road_id,
   }
 }
 
+// generate final routing response
 bool ResultGenerator::GeneratePassageRegion(
-    const std::string& map_version, const RoutingRequest& request,
+    const std::string& map_version, 
+    const RoutingRequest& request,
     const std::vector<NodeWithRange>& nodes,
-    const TopoRangeManager& range_manager, RoutingResponse* const result) {
+    const TopoRangeManager& range_manager, 
+    RoutingResponse* const result) {
   if (!GeneratePassageRegion(nodes, range_manager, result)) {
     return false;
   }
@@ -336,7 +473,7 @@ bool ResultGenerator::GeneratePassageRegion(
 
 bool ResultGenerator::GeneratePassageRegion(
     const std::vector<NodeWithRange>& nodes, // result node from routing
-    const TopoRangeManager& range_manager, // 维护了node到range的映射
+    const TopoRangeManager& range_manager,   // 维护了node到range的映射
     RoutingResponse* const result) {
   std::vector<PassageInfo> passages;
   // 用LC_edge给节点分组，分其成为不同的passage
@@ -396,7 +533,8 @@ void ResultGenerator::AddRoadSegment(
     auto node_end_iter = node_last_iter + 1;
     LaneNodesToPassageRegion(node_begin_iter, node_end_iter, passage);
 
-    // 两个新passage的id如果相等，则他们是forward关系；不相等则是变道关系
+    // passage(start_index)和passage(end_index)的id如果相等，则他们是forward关系；
+    // 不相等则是变道关系
     if (start_index.first == end_index.first) {
       // 只有一个passage时
       passage->set_change_lane_type(FORWARD);
