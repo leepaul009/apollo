@@ -47,14 +47,11 @@ const NodeWithRange& GetLargestRange(
 }
 
 /***************** search space for behavior planner:beg *****************/
-// generate final routing response
+// [New]
 bool ResultGenerator::GenerateRoutingResponse(
     const std::string& map_version, 
     const RoutingRequest& request,
     const std::vector<NodeWithRange>& nodes,
-    // const std::unordered_set<const TopoNode*>& search_space_nodes,
-    // const std::unordered_set<const TopoEdge*>& search_space_edges,
-    // const std::vector<std::vector<const TopoNode*>>& search_space,
     const std::vector<std::vector<NodeWithRange>>& search_space,
     const TopoRangeManager& range_manager, 
     RoutingResponse* const result) {
@@ -75,20 +72,16 @@ bool ResultGenerator::GenerateRoutingResponse(
   return true;
 }
 
-// RoadSegment
+// [New] For high-way case without blacklist, only blocks containing waypoint
+// have partial range, while other block should have full range.
 bool ResultGenerator::ExtractBasicRoadSegments(
   const std::vector<NodeWithRange>& nodes,
   const std::vector<std::vector<NodeWithRange>>& search_space,
   std::vector<std::vector<PassageInfo>>* const road_segments){
 
   road_segments->clear();
-  std::vector<std::vector<std::vector<NodeWithRange>>> roads; // temp container
-
-  // for high-way case without blacklist,
-  // only first and last block has partial range, 
-  // while other block should have full range.
-
-  std::vector<std::vector<NodeWithRange>> blocks;
+  std::vector<std::vector<BlockWithRange>> roads; // temp container
+  std::vector<BlockWithRange> blocks;
   blocks.push_back(search_space[0]);
 
   for (size_t i = 1; i < search_space.size(); ++i){
@@ -105,8 +98,13 @@ bool ResultGenerator::ExtractBasicRoadSegments(
         const auto* curr_node = curr_block[j].GetTopoNode();
         
         is_connected = false;
+        if (prev_node == curr_node) {
+          // TODO: consider blacklist in future
+          is_connected = true;
+          continue;  
+        }
         const auto& suc_edges = prev_node->OutToSucEdge();
-        if (const auto* e : suc_edges){
+        for (const auto* e : suc_edges){
           if (e->ToNode() == curr_node){
             is_connected = true;
             break;
@@ -154,7 +152,7 @@ bool ResultGenerator::ExtractBasicRoadSegments(
   return true;
 }
 
-
+// [New]
 bool ResultGenerator::FillRoutingResponse(
   const std::vector<std::vector<PassageInfo>>& road_segments,
   RoutingResponse* const result){
@@ -165,16 +163,15 @@ bool ResultGenerator::FillRoutingResponse(
     road->set_id(road_id);
 
     for (const auto& passage : passages) {
-      auto* passage = road->add_passage();
+      auto* p = road->add_passage();
       LaneNodesToPassageRegion(
-        passage.nodes.cbegin(), passage.nodes.cend(), passage);
-      passage->set_change_lane_type(FORWARD);
-      passage->set_can_exit(true);
+        passage.nodes.cbegin(), passage.nodes.cend(), p);
+      p->set_change_lane_type(FORWARD);
+      p->set_can_exit(true);
     }
   }
-  reutrn true;
+  return true;
 }
-
 /***************** search space for behavior planner:end *****************/
 
 // 对于passage内的节点，他们之间的edge都是forward关系，

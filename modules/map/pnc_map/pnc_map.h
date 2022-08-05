@@ -66,33 +66,44 @@ class PncMap {
                         std::list<RouteSegments> *const route_segments);
 
 /************************* for behavior planner:beg *************************/
-
-  std::vector<LaneInfoConstPtr> GetSuccessors(LaneInfoConstPtr lane);
-  std::vector<LaneInfoConstPtr> GetPredecessors(LaneInfoConstPtr lane);
-  std::vector<LaneInfoConstPtr> GetLeftAndRightNeighbors(LaneInfoConstPtr lane);
+  /**
+   * @brief [new] Algorithms for extract information from HdMap.
+   */
+  std::vector<LaneInfoConstPtr> GetSuccessors(LaneInfoConstPtr lane) const;
+  std::vector<LaneInfoConstPtr> GetPredecessors(LaneInfoConstPtr lane) const;
+  std::vector<LaneInfoConstPtr> GetLeftAndRightNeighbors(LaneInfoConstPtr lane) const;
 
   /**
-   * @brief Form a given lane segment, it search all possible continous lane sequence
-   * within horizon. Both forward and backward search is possible.
+   * @brief [new] Form a given lane segment, it search all possible continous
+   *  lane sequence within horizon. Both forward and backward search is possible.
    */
-  bool getPossibleSequencesFromLaneSegment(
+  bool GetPossibleSequencesFromLaneSegment(
     const LaneSegment& lane_segment,
     const double horizon,
     const bool is_forward,
     std::list<RouteSegments>& sequences);
 
+  /**
+   * @brief [new] Search target lane sequence for lane merge scene.
+   */
+  bool ExtendLaneSequencesForLaneMerge(
+    const double horizon, // TODO: current not use
+    std::list<RouteSegments>& sequences);
+  
+  /**
+   * @brief [new]
+   */
   bool GetRouteSegmentsInSearchSpace(
     const std::array<int, 3>& ego_route_index,
     const double horizon,
     const double backward_extend_horizon,
     std::list<RouteSegments>& lane_sequences);
 
-  bool ExtendLaneSequencesForLaneMerge(
-    const double horizon, // TODO: current not use
-    std::list<RouteSegments>& sequences);
-  
+  /**
+   * @brief [new]
+   */
   bool GetRouteSegmentsInHorizon(
-    const VehicleState &vehicle_state,
+    const common::VehicleState &vehicle_state,
     const double backward_length,
     const double forward_length,
     std::list<RouteSegments> *const route_segments_candidates);

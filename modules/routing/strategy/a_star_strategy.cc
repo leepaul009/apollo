@@ -206,12 +206,15 @@ bool Reconstruct(
 
 
 /***************** search space for behavior planner : beg *****************/
+// [New] member function to compute search space
+// TODO: if int is not enough for range
 int AStarStrategy::isNodeInRoute(
     const TopoNode* node,
     const size_t start_route_idx,
     const std::vector<std::string>& road_ids_in_route,
-    const bool is_forward){
-  const auto& road_id = node.RoadId();
+    const bool is_forward) const {
+
+  const auto& road_id = node->RoadId();
   if (is_forward)
     for (size_t i=start_route_idx; i < road_ids_in_route.size(); ++i){
       if (road_id == road_ids_in_route[i]){
@@ -227,7 +230,7 @@ int AStarStrategy::isNodeInRoute(
   return -1;
 }
 
-// only work on graph, rather than subgraph?
+// [New] member function to compute search space
 bool AStarStrategy::GetSearchSpace(
     const TopoNode* src_node,
     const TopoNode* dest_node,
@@ -237,18 +240,18 @@ bool AStarStrategy::GetSearchSpace(
     std::unordered_set<const TopoEdge*>& search_space_edges){
 
   // get all of road id from routing result
-  std::unordered_set<std::string> tmp;
+  std::unordered_set<std::string> road_set;
   std::vector<std::string> road_ids_in_route;
-  for (const auto& n : result_nodes){
-    const auto& road_id = n.GetTopoNode().RoadId();
-    if (tmp.count(road_id) == 0){
-      tmp.insert(road_id);
+  for (const auto& node : result_nodes){
+    const auto& road_id = node.GetTopoNode()->RoadId();
+    if (road_set.count(road_id) == 0){
+      road_set.insert(road_id);
       road_ids_in_route.push_back(road_id);
     }
   }
 
   struct NodeWithRouteId{
-    NodeWithRouteId(const TopoNode* n, size_t i) : node(n), route_idx(i) {}
+    NodeWithRouteId(const TopoNode* n, size_t i) : topo_node(n), route_idx(i) {}
     const TopoNode* topo_node = nullptr;
     size_t route_idx = 0; // road index in the route result
   };
@@ -256,100 +259,90 @@ bool AStarStrategy::GetSearchSpace(
   bool found_dest = false;
   std::unordered_set<const TopoNode*> forward_search_nodes;
   std::unordered_set<const TopoEdge*> forward_search_edges;
-  std::deque<NodeWithRouteId> open_list;
-  
-  open_list.push_back( NodeWithRouteId(src_node, 0) );
-  forward_search_nodes.insert(open_list->topo_node);
-
   std::unordered_set<const TopoEdge*> sub_edge_set;
+  std::deque<NodeWithRouteId> open_list;
+  open_list.emplace_back(src_node, 0);
+  forward_search_nodes.insert(open_list.front().topo_node);
 
   // forward search from src_node to dest_node
   while(!open_list.empty()){
-    NodeWithRouteId cur = open_list.front();
-    const auto* cur_node = cur.topo_node;
-    const auto cur_route_idx = cur.route_idx;
+    const auto* cur_node = open_list.front().topo_node;
+    const auto cur_route_idx = open_list.front().route_idx;
     open_list.pop_front();
 
-    // const std::unordered_set<const TopoEdge*>& out_edges = cur_node->OutToAllEdge();
     sub_edge_set.clear();
     for (const auto* out_edge : cur_node->OutToAllEdge()){
       sub_graph->GetSubInEdgesIntoSubGraph(out_edge, &sub_edge_set);
     }
 
-    // for (const auto* out_edge : cur_node->OutToAllEdge()){
     for (const auto* out_edge : sub_edge_set){
-      // TODO：考虑 from_node(orig) -> to_node (goal, sub_node)的情况， 
-      //       out_edge因为是origEdge，找不到身为subNode的goal
       const auto* to_node = out_edge->ToNode();
-      int route_idx = 0;
       // check if to_node is in route
-      if ((route_idx = isNodeInRoute(to_node, cur_route_idx, road_ids_in_route, true)) >= 0){
-        forward_search_edges.insert(out_edge);
-        // ignore to_node if it is already visited
-        if (forward_search_nodes.count(to_node) == 0){
-          open_list.push_back(NodeWithRouteId(to_node, route_idx));
-          forward_search_nodes.insert(to_node);
-          if (to_node == dest_node){
-            found_dest = true;
-          }
+      int route_idx = isNodeInRoute(to_node, cur_route_idx, road_ids_in_route, true);
+      if (route_idx == -1){
+        continue;
+      }
+      forward_search_edges.insert(out_edge);
+      // ignore to_node that is already visited
+      if (forward_search_nodes.count(to_node) == 0){
+        open_list.emplace_back(to_node, route_idx);
+        forward_search_nodes.insert(to_node);
+        if (to_node == dest_node){
+          found_dest = true;
         }
       }
-    }
-  }
+    } // end for
+  } // end while
   if (!found_dest){
-    AERROR << "[GetSearchSpace] failed to get goal when search forward.";
+    AERROR << "[GetSearchSpace] failed to find goal when search forward.";
   }
 
   // backward search
+  found_dest = false;
   search_space_nodes.clear();
   search_space_edges.clear();
-  open_list.push_back(NodeWithRouteId(dest_node, road_ids_in_route.size()-1));
+  open_list.emplace_back(dest_node, road_ids_in_route.size() - 1);
   search_space_nodes.insert(dest_node);
   while(!open_list.empty()){
-    const auto& cur = open_list.front();
-    const auto* cur_node = cur.topo_node;
-    const auto cur_route_idx = cur.route_idx;
+    const auto* cur_node = open_list.front().topo_node;
+    const auto cur_route_idx = open_list.front().route_idx;
     open_list.pop_front();
 
-    // get sub_in_edge or orig_in_edge of cur_node
     sub_edge_set.clear();
     for (const auto* in_edge : cur_node->InFromAllEdge()){
       sub_graph->GetSubOutEdgesIntoSubGraph(in_edge, &sub_edge_set);
     }
 
-    // for (const auto* in_edge : cur_node->InFromAllEdge()){
     for (const auto* in_edge : sub_edge_set){
-      // TODO：考虑 from_node（orig） -》 to_node（srcNode，sub），因为srcNode为sub，in_edge为origEdge，找不到身为subNode的srcNode
       // if in_edge not in forward_search, then it should be ignored
       if (forward_search_edges.count(in_edge) == 0){
         continue;
       }
       const auto* in_node = in_edge->FromNode();
-      int route_index = 0; 
       // check if in_node in route
-      if ((route_index = isNodeInRoute(in_node, cur_route_idx, road_ids_in_route, false)) >= 0){
-        search_space_edges.insert(in_edge);
-        // check if in_node in forward searched node
-        if (forward_search_nodes.count(in_node) > 0){
-          
-          if (search_space_nodes.count(in_node) == 0){
-            open_list.push_back(NodeWithRouteId(in_node, route_index));
-            search_space_nodes.insert(in_node);
-            if (in_node == src_node){
-              found_dest = true;
-            }
-          }
-          
+      int route_index = isNodeInRoute(in_node, cur_route_idx, road_ids_in_route, false); 
+      if (route_index == -1){
+        continue;
+      }
+      search_space_edges.insert(in_edge);
+      // check if in_node in forward searched node
+      if (forward_search_nodes.count(in_node) > 0 && 
+          search_space_nodes.count(in_node) == 0){
+        open_list.emplace_back(in_node, route_index);
+        search_space_nodes.insert(in_node);
+        if (in_node == src_node){
+          found_dest = true;
         }
       }
-    }
-  }
+    } // end for
+  } // end while
   if (!found_dest){
     AERROR << "[GetSearchSpace] failed to get goal when search forward.";
   }
   return true;
 }
 
+// [New] member function to compute search space
 bool AStarStrategy::GetParallelSearchSpace(
     const TopoNode* src_node, 
     const TopoNode* dest_node, 
@@ -361,12 +354,13 @@ bool AStarStrategy::GetParallelSearchSpace(
   std::unordered_set<const TopoNode*> search_space_nodes;
   std::unordered_set<const TopoEdge*> search_space_edges;
   if (!GetSearchSpace(src_node, dest_node, sub_graph, result_nodes,
-    search_space_nodes, search_space_edges)){
+                      search_space_nodes, search_space_edges)){
+    AERROR << "[GetParallelSearchSpace] failed to get search space.";
     return false;
   }
 
   struct IsLeft{
-    bool operator(const TopoNode* a, const TopoNode* b) const {
+    bool operator()(const TopoNode* a, const TopoNode* b) const {
       for (const auto* e : a->OutToRightEdge()){
         if (e->ToNode() == b){
           return true;
@@ -379,44 +373,47 @@ bool AStarStrategy::GetParallelSearchSpace(
       }
       // TODO: step for parallel but unconnected nodes
       // as parallel laneSegment ID has order(left->right: -1, -2...)
-      size pos_a = a->LaneId().find_last_of("_");
-      size pos_b = b->LaneId().find_last_of("_");
-      // TODO: what if cannot find
-      std::string a_str = a->LaneId().substr(pos_a+1);
-      std::string b_str = b->LaneId().substr(pos_b+1);
-      int a_lid = atoi(a_str.c_str());
-      int b_lid = atoi(b_str.c_str());
-      if (a_lid > b_lid){
+      size_t pos_a = a->LaneId().find_last_of("_");
+      size_t pos_b = b->LaneId().find_last_of("_");
+      // TODO: what if cannot find "_"
+      if (pos_a == std::string::npos || pos_b == std::string::npos) {
+        return false;
+      }
+      int lid_a = atoi(a->LaneId().substr(pos_a+1).c_str());
+      int lid_b = atoi(b->LaneId().substr(pos_b+1).c_str());
+      if (lid_a > lid_b){
         return true;
       }
       return false;
     }
   };
 
-  std::vector<const TopoNode*> block; // a block of parallel nodes
+  // block: a set of parallel nodes(lane segments)
+  std::vector<const TopoNode*> block;
   std::vector<const TopoNode*> prev_block;
+  std::unordered_set<const TopoEdge*> next_edges;
   std::unordered_set<const TopoNode*> visited_nodes;
-  bool found_goal = false;
+  bool found_dest = false;
 
-  if (!found_goal){
+  if (!found_dest){
     block.clear();
     visited_nodes.clear();
 
-    // 1. get candidate parallel node of current block
+    // 1. get successors of current block as candidate block
     if (search_space.empty()){
       block.push_back(src_node);
       visited_nodes.insert(src_node);
     } else {
       // get candidates from previous block
-      // TODO:
-      // const auto& prev_block = search_space.back();
+      // TODO: how to deal with graph with blackedlist
+      // that node in the middle is a subNode
       for (const auto* prev_node : prev_block){
-        std::vector<const TopoEdge*> all_suc_edges;
+        next_edges.clear();
         for (const auto* e : prev_node->OutToSucEdge()){
-          sub_graph->GetSubInEdgesIntoSubGraph(e, &all_suc_edges);
+          sub_graph->GetSubInEdgesIntoSubGraph(e, &next_edges);
         }
 
-        for (const auto* e : all_suc_edges){
+        for (const auto* e : next_edges){
           const auto* to_node = e->ToNode();
           if (visited_nodes.count(to_node) > 0 || 
               search_space_nodes.count(to_node) == 0 ||
@@ -426,30 +423,27 @@ bool AStarStrategy::GetParallelSearchSpace(
           block.push_back(to_node);
           visited_nodes.insert(to_node);
           if (to_node == dest_node){
-            found_goal = true;
+            found_dest = true;
           }
         }
       }
-
       // TODO: check corner case for sort
       // nodes of block should be arranged from left to right
       std::sort(block.begin(), block.end(), IsLeft());
     }
 
-    // 2. extend current block with neighbor nodes
+    // 2. extend current block with its neighbor nodes
     for (auto it = block.begin(); it != block.end();){
       const auto* cur_node = *it;
-
-      // get all of sub-edge or orig-edge of cur_node
-      std::vector<const TopoEdge*> neighbor_edges;
+      next_edges.clear();
       for (const auto* e : cur_node->OutToLeftOrRightEdge()){
-        sub_graph->GetSubInEdgesIntoSubGraph(e, &neighbor_edges);
+        sub_graph->GetSubInEdgesIntoSubGraph(e, &next_edges);
       }
-
       // TODO: check if a orig node left/right-connected with more than 2 sub-nodes
       // 起点、终点node的情况，都是sub-node左右相连，不存在这种情况
-      const TopoEdge* left, right;
-      for (const auto* e : neighbor_edges){
+      const TopoNode* left; 
+      const TopoNode* right;
+      for (const auto* e : next_edges){
         const auto* to_node = e->ToNode();
         
         if (search_space_edges.count(e) == 0 ||
@@ -458,7 +452,7 @@ bool AStarStrategy::GetParallelSearchSpace(
           continue;
         }
         if (to_node == dest_node){
-          found_goal = true;
+          found_dest = true;
         }
 
         if (e->Type() == TopoEdgeType::TET_LEFT){
@@ -474,7 +468,7 @@ bool AStarStrategy::GetParallelSearchSpace(
           it = block.insert(it + 1, right);
         }
         if (left != nullptr){
-          it = block.insert(it - (right != nullptr)? 1 : 0, left);
+          it = block.insert(it - (right != nullptr? 1 : 0), left);
         }
         // start from left node for next step
       } else {
@@ -483,10 +477,11 @@ bool AStarStrategy::GetParallelSearchSpace(
     }
     
     // 3. add into parallel search space
-    search_space.push_back(std::vector<NodeWithRange>());
-    for (const auto* n : block){
-      search_space.back().push_back(NodeWithRange(n->OriginNode(), 
-        n->StartS(), n->EndS()));
+    // search_space.push_back(std::vector<NodeWithRange>());
+    search_space.emplace_back();
+    for (const auto* node : block){
+      search_space.back().emplace_back(node->OriginNode(), 
+                                       node->StartS(), node->EndS());
     }
     prev_block = block;
   }

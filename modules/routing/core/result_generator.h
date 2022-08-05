@@ -40,6 +40,10 @@ class ResultGenerator {
                              RoutingResponse* const result);
 
 /***************** search space for behavior planner:beg *****************/
+  typedef std::vector<NodeWithRange> BlockWithRange;
+  /**
+   * @brief [New]
+   */
   bool GenerateRoutingResponse(
     const std::string& map_version, 
     const RoutingRequest& request,
@@ -88,11 +92,16 @@ class ResultGenerator {
                                    NodeWithRange* reachable_node);
   
   /***************** search space for behavior planner:beg *****************/
+  /**
+   * @brief [New]
+   */
   bool ExtractBasicRoadSegments(
     const std::vector<NodeWithRange>& nodes,
     const std::vector<std::vector<NodeWithRange>>& search_space,
     std::vector<std::vector<PassageInfo>>* const road_segments);
-
+  /**
+   * @brief [New]
+   */
   bool FillRoutingResponse(
     const std::vector<std::vector<PassageInfo>>& road_segments,
     RoutingResponse* const result);

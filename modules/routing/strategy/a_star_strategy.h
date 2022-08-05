@@ -35,12 +35,22 @@ class AStarStrategy : public Strategy {
                       std::vector<NodeWithRange>* const result_nodes);
 
 /***************** search space for behavior planner:beg *****************/
+  /**
+   * @brief [New]
+   * @param start_route_idx the road index from which searching will start
+   * @return the route index of matched road of the node, return -1 if no match
+   */
   int isNodeInRoute(
     const TopoNode* node,
     const size_t start_route_idx,
     const std::vector<std::string>& road_ids_in_route,
-    const bool is_forward);
-
+    const bool is_forward) const;
+  
+  /**
+   * @brief [New] search space is a set of lane segments that ego can drive in.
+   * @param[out] search_space_nodes nodes of search space
+   * @param[out] search_space_edges edges of search space
+   */
   bool GetSearchSpace(
     const TopoNode* src_node,
     const TopoNode* dest_node,
@@ -49,7 +59,10 @@ class AStarStrategy : public Strategy {
     std::unordered_set<const TopoNode*>& search_space_nodes,
     std::unordered_set<const TopoEdge*>& search_space_edges);
 
-  bool GetParallelSearchSpace(
+  /**
+   * @brief [New]
+   */
+  virtual bool GetParallelSearchSpace(
     const TopoNode* src_node, 
     const TopoNode* dest_node, 
     const SubTopoGraph* sub_graph,

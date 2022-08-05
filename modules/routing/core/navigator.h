@@ -37,6 +37,9 @@ class Navigator {
                    RoutingResponse* const response);
 
 /***************** search space for behavior planner:beg *****************/
+  /**
+   * @brief [New]
+   */
   bool SearchRouteAndSearchSpace(const RoutingRequest& request,
                             RoutingResponse* const response);
 /***************** search space for behavior planner:end *****************/
@@ -53,7 +56,13 @@ class Navigator {
       const std::vector<double>& way_s,
       std::vector<NodeWithRange>* const result_nodes) const;
 
+  bool MergeRoute(const std::vector<NodeWithRange>& node_vec,
+                  std::vector<NodeWithRange>* const result_node_vec) const;
+
 /***************** search space for behavior planner:beg *****************/
+  /**
+   * @brief [New]
+   */
   bool SearchRouteAndSearchSpaceByStrategy(
     const TopoGraph* graph, 
     const std::vector<const TopoNode*>& way_nodes,
@@ -61,9 +70,6 @@ class Navigator {
     std::vector<NodeWithRange>* const result_nodes,
     std::vector<std::vector<NodeWithRange>>* const search_space) const;
 /***************** search space for behavior planner:end *****************/
-
-  bool MergeRoute(const std::vector<NodeWithRange>& node_vec,
-                  std::vector<NodeWithRange>* const result_node_vec) const;
 
  private:
   bool is_ready_ = false;

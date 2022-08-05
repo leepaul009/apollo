@@ -28,6 +28,17 @@ class Strategy {
   virtual bool Search(const TopoGraph* graph, const SubTopoGraph* sub_graph,
                       const TopoNode* src_node, const TopoNode* dest_node,
                       std::vector<NodeWithRange>* const result_nodes) = 0;
+/***************** search space for behavior planner:beg *****************/                   
+  /**
+   * @brief [New]
+   */
+  virtual bool GetParallelSearchSpace(
+    const TopoNode* src_node, 
+    const TopoNode* dest_node, 
+    const SubTopoGraph* sub_graph,
+    const std::vector<NodeWithRange>& result_nodes,
+    std::vector<std::vector<NodeWithRange>>& search_space) = 0;
+/***************** search space for behavior planner:end *****************/
 };
 
 }  // namespace routing
