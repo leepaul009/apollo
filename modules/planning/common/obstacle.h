@@ -235,25 +235,25 @@ class Obstacle {
       const perception::PerceptionObstacle& perception_obstacle);
 
  private:
-  std::string id_;
-  int32_t perception_id_ = 0;
-  bool is_static_ = false;
-  bool is_virtual_ = false;
-  double speed_ = 0.0;
+  std::string id_;            // update by frame init
+  int32_t perception_id_ = 0; // update by frame init
+  bool is_static_ = false;    // update by frame init
+  bool is_virtual_ = false;   // update by frame init
+  double speed_ = 0.0;        // update by frame init
 
   bool path_st_boundary_initialized_ = false;
 
-  prediction::Trajectory trajectory_;
-  perception::PerceptionObstacle perception_obstacle_;
-  common::math::Box2d perception_bounding_box_;
-  common::math::Polygon2d perception_polygon_;
+  prediction::Trajectory trajectory_;                   // update by frame init
+  perception::PerceptionObstacle perception_obstacle_;  // update by frame init
+  common::math::Box2d perception_bounding_box_;         // update by frame init
+  common::math::Polygon2d perception_polygon_;          // update by frame init
 
   // used for em-planer
   std::vector<ObjectDecisionType> decisions_;
   std::vector<std::string> decider_tags_;
   SLBoundary sl_boundary_;
 
-  STBoundary reference_line_st_boundary_;
+  STBoundary reference_line_st_boundary_; // update by refLineInfo init in frame init
   STBoundary path_st_boundary_;
 
   ObjectDecisionType lateral_decision_;
@@ -263,7 +263,7 @@ class Obstacle {
   bool is_blocking_obstacle_ = false;
   bool is_lane_blocking_ = false;
   bool is_lane_change_blocking_ = false;
-  bool is_caution_level_obstacle_ = false;
+  bool is_caution_level_obstacle_ = false; // update by frame init
 
 
   double min_radius_stop_distance_ = -1.0;

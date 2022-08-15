@@ -350,6 +350,8 @@ bool AStarStrategy::GetParallelSearchSpace(
     const std::vector<NodeWithRange>& result_nodes,
     std::vector<std::vector<NodeWithRange>>& search_space){
   
+  search_space.clear();
+  AINFO << "To get parallel search space.";
   // get all nodes and edges which belong to road-level-route
   std::unordered_set<const TopoNode*> search_space_nodes;
   std::unordered_set<const TopoEdge*> search_space_edges;
@@ -358,6 +360,8 @@ bool AStarStrategy::GetParallelSearchSpace(
     AERROR << "[GetParallelSearchSpace] failed to get search space.";
     return false;
   }
+  AINFO << "Got search space with " << search_space_nodes.size() << 
+           " nodes and " << search_space_edges.size() << " edges.";
 
   struct IsLeft{
     bool operator()(const TopoNode* a, const TopoNode* b) const {
@@ -395,15 +399,23 @@ bool AStarStrategy::GetParallelSearchSpace(
   std::unordered_set<const TopoNode*> visited_nodes;
   bool found_dest = false;
 
-  if (!found_dest){
+  while (!found_dest){
     block.clear();
     visited_nodes.clear();
 
+    if (prev_block.size() >= 1)
+      AINFO << " visit node with lane id = " << prev_block[0]->LaneId();
+
+    AINFO << " 1. get successors of current block as candidate block";
     // 1. get successors of current block as candidate block
     if (search_space.empty()){
       block.push_back(src_node);
       visited_nodes.insert(src_node);
     } else {
+      // TODO: check why prev block empty, should not happen
+      if (prev_block.size() == 0) {
+        break;
+      }
       // get candidates from previous block
       // TODO: how to deal with graph with blackedlist
       // that node in the middle is a subNode
@@ -422,7 +434,7 @@ bool AStarStrategy::GetParallelSearchSpace(
           }
           block.push_back(to_node);
           visited_nodes.insert(to_node);
-          if (to_node == dest_node){
+          if (to_node->LaneId() == dest_node->LaneId()){
             found_dest = true;
           }
         }
@@ -431,7 +443,7 @@ bool AStarStrategy::GetParallelSearchSpace(
       // nodes of block should be arranged from left to right
       std::sort(block.begin(), block.end(), IsLeft());
     }
-
+    AINFO << " 2. extend current block with its neighbor nodes";
     // 2. extend current block with its neighbor nodes
     for (auto it = block.begin(); it != block.end();){
       const auto* cur_node = *it;
@@ -441,8 +453,8 @@ bool AStarStrategy::GetParallelSearchSpace(
       }
       // TODO: check if a orig node left/right-connected with more than 2 sub-nodes
       // 起点、终点node的情况，都是sub-node左右相连，不存在这种情况
-      const TopoNode* left; 
-      const TopoNode* right;
+      const TopoNode* left = nullptr; 
+      const TopoNode* right = nullptr;
       for (const auto* e : next_edges){
         const auto* to_node = e->ToNode();
         
@@ -451,7 +463,7 @@ bool AStarStrategy::GetParallelSearchSpace(
             visited_nodes.count(to_node) != 0){
           continue;
         }
-        if (to_node == dest_node){
+        if (to_node->LaneId() == dest_node->LaneId()){
           found_dest = true;
         }
 
@@ -475,7 +487,7 @@ bool AStarStrategy::GetParallelSearchSpace(
         it++;
       }
     }
-    
+    AINFO << " 3. add into parallel search space";
     // 3. add into parallel search space
     // search_space.push_back(std::vector<NodeWithRange>());
     search_space.emplace_back();
@@ -486,6 +498,7 @@ bool AStarStrategy::GetParallelSearchSpace(
     prev_block = block;
   }
 
+  AINFO << "Got parallel search space.";
   return true;
 }
 
